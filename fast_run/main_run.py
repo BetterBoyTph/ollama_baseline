@@ -85,7 +85,7 @@ DEFAULT_CONFIG = {
         "data_file": "huanhuan.json"
     },
     "data_process": {
-        "max_samples": None,
+        "max_samples": 50,
         "train_ratio": 0.8,
         "val_ratio": 0.1,
         "test_ratio": 0.1

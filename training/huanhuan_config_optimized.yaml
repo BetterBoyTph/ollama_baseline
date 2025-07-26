@@ -10,7 +10,7 @@ model:
 
 # 训练参数 - 优化配置
 training:
-  output_dir: "../training/models/huanhuan_optimized"  # 优化模型输出目录
+  output_dir: "./models/huanhuan_optimized"  # 优化模型输出目录
   num_train_epochs: 5                         # 增加训练轮数以充分学习
   per_device_train_batch_size: 4              # 增加批次大小提高训练效率
   per_device_eval_batch_size: 4               # 增加评估批次大小

@@ -48,7 +48,17 @@ script_dir = Path(__file__).parent
 log_dir = script_dir / "logs"
 log_dir.mkdir(exist_ok=True)
 
-logger.add(str(log_dir / "training.log"), rotation="10 MB", retention="7 days", level="INFO")
+# 从配置中获取日志文件路径
+log_file = config.get('logging', {}).get('log_file', str(log_dir / "training.log"))
+# 如果是相对路径，则基于项目根目录进行解析
+if log_file.startswith("..") or not os.path.isabs(log_file):
+    # 获取项目根目录（training目录的上级目录）
+    project_root = script_dir.parent
+    # 构建相对于项目根目录的路径
+    log_file_path = project_root / "training" / "logs" / Path(log_file).name
+    log_file = str(log_file_path)
+
+logger.add(log_file, rotation="10 MB", retention="7 days", level="INFO")
 
 
 
@@ -58,6 +68,17 @@ class HuanHuanDataset(Dataset):
     """
     
     def __init__(self, data_file: str, tokenizer, max_length: int = 512):
+        # 如果是相对路径，则基于项目根目录进行解析
+        if data_file.startswith("..") or not os.path.isabs(data_file):
+            # 获取项目根目录（training目录的上级目录）
+            script_dir = Path(__file__).parent
+            project_root = script_dir.parent
+            # 从配置文件路径中提取文件名
+            data_filename = Path(data_file).name
+            # 构建相对于项目根目录的路径
+            data_file_path = project_root / "data" / "processed" / data_filename
+            data_file = str(data_file_path)
+            
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.conversations = self.load_conversations(data_file)
@@ -164,6 +185,16 @@ class HuanHuanTrainer:
             with open(self.config_path, 'r', encoding='utf-8') as f:
                 self.config = yaml.safe_load(f)
             
+            # 处理输出目录路径
+            output_dir = self.config['training']['output_dir']
+            if output_dir.startswith("..") or not os.path.isabs(output_dir):
+                # 获取项目根目录（training目录的上级目录）
+                script_dir = Path(__file__).parent
+                project_root = script_dir.parent
+                # 构建相对于项目根目录的路径
+                output_dir_path = project_root / "training" / "models" / Path(output_dir).name
+                self.config['training']['output_dir'] = str(output_dir_path)
+            
             # 创建输出目录
             os.makedirs(self.config['training']['output_dir'], exist_ok=True)
             logger.info(f"配置文件加载成功: {self.config_path}")
@@ -254,7 +285,17 @@ class HuanHuanTrainer:
         """
         准备训练数据集
         """
+        # 获取配置中的数据文件路径
         data_file = self.config['data']['train_file']
+        
+        # 如果是相对路径，则基于项目根目录进行解析
+        if data_file.startswith("..") or not os.path.isabs(data_file):
+            # 获取项目根目录（training目录的上级目录）
+            script_dir = Path(__file__).parent
+            project_root = script_dir.parent
+            # 构建相对于项目根目录的路径
+            data_file_path = project_root / "data" / "processed" / "train.jsonl"
+            data_file = str(data_file_path)
         
         if not os.path.exists(data_file):
             logger.error(f"训练数据文件不存在: {data_file}")

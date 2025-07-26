@@ -10,7 +10,7 @@ model:
 
 # 训练参数
 training:
-  output_dir: "../training/models/huanhuan"  # 模型输出目录
+  output_dir: "./models/huanhuan"  # 模型输出目录
   num_train_epochs: 3  # 训练轮数
   per_device_train_batch_size: 2  # 训练批次大小（Qwen2.5-0.5B需要更多内存）
   per_device_eval_batch_size: 2  # 评估批次大小
@@ -116,7 +116,7 @@ system:
 # 日志配置
 logging:
   log_level: "INFO"  # 日志级别
-  log_file: "../training/logs/huanhuan_train.log"  # 日志文件
+  log_file: "./logs/huanhuan_train.log"  # 日志文件
   report_to: []  # 报告到: ["wandb", "tensorboard"]
   
   # Weights & Biases配置（可选）
@@ -225,12 +225,13 @@ deployment:
     
     # 对话模板
     template: |
-      {{ if .System }}<|im_start|>system
-      {{ .System }}<|im_end|>
-      {{ end }}{{ if .Prompt }}<|im_start|>user
-      {{ .Prompt }}<|im_end|>
-      <|im_start|>assistant
-      {{ end }}{{ .Response }}<|im_end|>
+      {{ if .System }}```
+      {{ .System }}
+      ```
+      {{ end }}{{ if .Prompt }}```
+      {{ .Prompt }}
+      ```
+      {{ end }}{{ .Response }}
 
 # 实验配置
 experiment:

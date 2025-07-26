@@ -4,7 +4,7 @@
 
 # 训练参数 - 针对小数据集优化
 training:
-  output_dir: "../training/models/huanhuan_fast"  # 快速训练模型输出目录
+  output_dir: "./models/huanhuan_fast"  # 快速训练模型输出目录
   num_train_epochs: 1                         # 进一步减少训练轮数
   per_device_train_batch_size: 1              # 最小batch size
   per_device_eval_batch_size: 1
@@ -42,9 +42,9 @@ lora:
 
 # 数据配置
 data:
-  train_file: "../data/processed/train.jsonl"
-  validation_file: "../data/processed/validation.jsonl"
-  test_file: "../data/processed/test.jsonl"
+  train_file: "../../data/processed/train.jsonl"
+  validation_file: "../../data/processed/validation.jsonl"
+  test_file: "../../data/processed/test.jsonl"
   max_seq_length: 128                         # 极小序列长度以节省内存
   preprocessing_num_workers: 0                # 禁用多线程预处理
 
@@ -69,10 +69,11 @@ character:
 
 # 系统配置
 system:
-  device: "auto"                              # 使用MPS设备
-  seed: 42
+  device: "auto"                              # 自动检测设备 (cuda/mps/cpu)
+  seed: 42                                    # 随机种子
   use_fast_tokenizer: true
   trust_remote_code: false
+  torch_dtype: "float32"                      # 强制使用float32
 
 # 日志配置
 logging:

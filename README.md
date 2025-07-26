@@ -15,6 +15,11 @@ ollama_baseline/
 │   ├── FAST_DEPLOYMENT_GUIDE.md  # 快速部署指南
 │   ├── Modelfile.huanhuan        # Ollama模型文件
 │   └── huanhuan_fast_lora.gguf   # LoRA权重文件
+├── evaluate/             # 模型评估
+│   ├── evaluator.py             # 核心评估模块
+│   ├── example_usage.py         # 使用示例
+│   ├── requirements.txt         # 评估模块依赖
+│   └── README.md               # 评估模块说明
 ├── mcp_server/          # MCP服务器
 │   ├── __init__.py      # 服务器入口
 │   └── server.py        # MCP服务器核心逻辑
@@ -45,6 +50,12 @@ ollama_baseline/
 - **Modelfile.huanhuan**: Ollama模型配置文件
 - **huanhuan_fast_lora.gguf**: 训练好的LoRA权重文件
 - 支持一键部署到Ollama服务
+
+### 🎯 模型评估 (evaluate)
+- **evaluator.py**: 大模型自动化评估模块
+- 支持BLEU、ROUGE、语义相似度等多种评估指标
+- 可对比多个模型并生成详细评估报告
+- 参考 [评估模块说明](evaluate/README.md) 了解详细使用方法
 
 ### 🔌 MCP服务器 (mcp_server)
 - **server.py**: MCP (Model Context Protocol) 服务器实现
@@ -100,4 +111,3 @@ source huanhuan_env/bin/activate  # macOS/Linux
 # 4. 使用uv安装依赖（比pip快10-100倍）
 uv pip install -r requirements.txt
 ```
-

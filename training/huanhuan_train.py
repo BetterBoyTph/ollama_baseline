@@ -12,6 +12,10 @@
 """
 
 import os
+# 设置国内镜像源（新增代码）
+os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
+os.environ['HF_CACHE_DIR'] = './.cache'
+
 import sys
 import json
 import yaml

@@ -20,10 +20,14 @@ from pathlib import Path
 from typing import List, Dict
 import time
 from datetime import datetime
+import uuid
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
+
+# 导入反馈处理模块
+from application.feedback_handler import FeedbackHandler
 
 # 页面配置
 st.set_page_config(
@@ -41,6 +45,9 @@ class HuanHuanWebApp:
     def __init__(self):
         self.ollama_host = "http://localhost:11434"
         self.model_name = "huanhuan-qwen"
+        
+        # 初始化反馈处理器
+        self.feedback_handler = FeedbackHandler()
         
         # 初始化session state
         self.init_session_state()
@@ -78,6 +85,14 @@ class HuanHuanWebApp:
         # 对话历史记录
         if 'chat_history' not in st.session_state:
             st.session_state.chat_history = []
+        
+        # 会话ID
+        if 'session_id' not in st.session_state:
+            st.session_state.session_id = str(uuid.uuid4())
+        
+        # 当前对话的反馈状态
+        if 'current_feedback' not in st.session_state:
+            st.session_state.current_feedback = {}
     
     def check_ollama_connection(self) -> bool:
         """
@@ -105,7 +120,7 @@ class HuanHuanWebApp:
             response = requests.get(f"{self.ollama_host}/api/tags")
             if response.status_code == 200:
                 data = response.json()
-                models = [model['name'] for model in data.get('models', [])]
+                models = [model['name'] for model in data['models']]
                 st.session_state.available_models = models
                 return models
         except Exception as e:
@@ -113,50 +128,82 @@ class HuanHuanWebApp:
         
         return []
     
-    def stream_chat(self, messages, model):
+    def chat_with_model(self, prompt: str, model: str) -> str:
         """
-        流式对话生成
-        """
-        url = f"{self.ollama_host}/api/chat"
+        与模型对话
         
-        payload = {
-            "model": model,
-            "messages": messages,
-            "stream": True,
-            "options": {
-                "temperature": st.session_state.temperature,
-                "top_p": st.session_state.top_p,
-                "top_k": st.session_state.top_k
+        Args:
+            prompt: 用户输入
+            model: 模型名称
+            
+        Returns:
+            模型回复
+        """
+        try:
+            payload = {
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": st.session_state.temperature,
+                    "top_p": st.session_state.top_p,
+                    "top_k": st.session_state.top_k,
+                    "num_predict": st.session_state.max_tokens
+                }
             }
-        }
+            
+            response = requests.post(
+                f"{self.ollama_host}/api/generate",
+                json=payload,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("response", "")
+            else:
+                return f"错误: HTTP {response.status_code}"
+        except Exception as e:
+            return f"请求失败: {str(e)}"
+    
+    def save_chat_history(self):
+        """
+        保存聊天历史到文件
+        """
+        if not st.session_state.messages:
+            return
         
         try:
-            response = requests.post(url, json=payload, stream=True, timeout=60)
-            response.raise_for_status()
+            # 创建聊天历史目录
+            history_dir = Path(__file__).parent / "chat_history"
+            history_dir.mkdir(exist_ok=True)
             
-            for line in response.iter_lines():
-                if line:
-                    try:
-                        data = json.loads(line.decode('utf-8'))
-                        if 'message' in data and 'content' in data['message']:
-                            yield data['message']['content']
-                        
-                        if data.get('done', False):
-                            break
-                    except json.JSONDecodeError:
-                        continue
-                        
-        except requests.exceptions.RequestException as e:
-            yield f"连接错误: {e}"
+            # 生成文件名
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"huanhuan_chat_{timestamp}.json"
+            filepath = history_dir / filename
+            
+            # 保存聊天历史
+            chat_data = {
+                "session_id": st.session_state.session_id,
+                "timestamp": timestamp,
+                "messages": st.session_state.messages
+            }
+            
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(chat_data, f, ensure_ascii=False, indent=2)
+            
+            st.success(f"聊天历史已保存: {filename}")
         except Exception as e:
-            yield f"未知错误: {e}"
+            st.error(f"保存聊天历史失败: {e}")
     
     def render_sidebar(self):
         """
         渲染侧边栏
         """
         with st.sidebar:
-            st.title("⚙️ 设置")
+            st.title("👑 Chat-嬛嬛")
+            st.markdown("---")
             
             # 连接状态
             if self.check_ollama_connection():
@@ -165,376 +212,288 @@ class HuanHuanWebApp:
                 st.error("🔴 Ollama服务未连接")
                 st.info("请确保Ollama服务正在运行")
             
-            st.divider()
-            
             # 模型选择
-            st.subheader("🤖 模型设置")
             available_models = self.get_available_models()
-            
             if available_models:
-                if self.model_name in available_models:
-                    default_index = available_models.index(self.model_name)
-                else:
-                    default_index = 0
-                
-                selected_model = st.selectbox(
+                st.session_state.selected_model = st.selectbox(
                     "选择模型",
-                    available_models,
-                    index=default_index
+                    options=available_models,
+                    index=0 if st.session_state.selected_model is None else 
+                          available_models.index(st.session_state.selected_model) 
+                          if st.session_state.selected_model in available_models else 0
                 )
-                st.session_state.selected_model = selected_model
-                self.model_name = selected_model
             else:
                 st.warning("未找到可用模型")
-                st.info("请先部署甄嬛模型")
+                st.session_state.selected_model = None
             
-            st.divider()
+            st.markdown("---")
             
             # 参数调节
-            st.subheader("🎛️ 生成参数")
-            
+            st.subheader("⚙️ 参数调节")
             st.session_state.temperature = st.slider(
-                "Temperature (创造性)",
-                min_value=0.1,
-                max_value=2.0,
-                value=st.session_state.temperature,
-                step=0.1,
-                help="控制回答的随机性，值越高越有创造性"
+                "Temperature", 0.0, 1.0, st.session_state.temperature, 0.1
             )
-            
             st.session_state.top_p = st.slider(
-                "Top P (多样性)",
-                min_value=0.1,
-                max_value=1.0,
-                value=st.session_state.top_p,
-                step=0.1,
-                help="控制词汇选择的多样性"
+                "Top-p", 0.0, 1.0, st.session_state.top_p, 0.1
             )
-            
             st.session_state.top_k = st.slider(
-                "Top K (词汇范围)",
-                min_value=1,
-                max_value=100,
-                value=st.session_state.top_k,
-                step=1,
-                help="限制每步选择的词汇数量"
+                "Top-k", 1, 100, st.session_state.top_k, 1
             )
-            
             st.session_state.max_tokens = st.slider(
-                "Max Tokens (回答长度)",
-                min_value=50,
-                max_value=500,
-                value=st.session_state.max_tokens,
-                step=10,
-                help="控制回答的最大长度"
+                "最大生成长度", 50, 1000, st.session_state.max_tokens, 50
             )
             
-            st.divider()
+            st.markdown("---")
             
             # 功能按钮
-            st.subheader("🛠️ 功能")
-            
-            col1, col2, col3 = st.columns(3)
-            
+            col1, col2 = st.columns(2)
             with col1:
-                if st.button("🗑️ 清空对话", use_container_width=True):
+                if st.button("💾 保存对话"):
+                    self.save_chat_history()
+            
+            with col2:
+                if st.button("🗑️ 清空对话"):
                     st.session_state.messages = []
-                    st.session_state.chat_history = []
+                    st.session_state.session_id = str(uuid.uuid4())
                     st.rerun()
             
-            with col2:
-                if st.button("💾 保存对话", use_container_width=True):
-                    if st.session_state.chat_history:
-                        self.save_chat_history()
-                        st.success("对话已保存！")
-                    else:
-                        st.warning("没有对话内容可保存")
-            
-            with col3:
-                if st.button("📂 加载对话", use_container_width=True):
-                    self.load_chat_history()
+            # 反馈统计
+            st.markdown("---")
+            st.subheader("📊 反馈统计")
+            feedback_stats = self.feedback_handler.get_feedback_stats()
+            st.metric("总反馈数", feedback_stats['total_feedback'])
+            st.metric("正面反馈率", f"{feedback_stats['positive_rate']:.2%}")
+            st.metric("平均评分", feedback_stats['avg_rating'])
     
-    def render_main_content(self):
+    def render_feedback_section(self, message_index: int):
         """
-        渲染主要内容
+        渲染反馈部分
+        
+        Args:
+            message_index: 消息索引
         """
-        # 标题和介绍
-        st.title("👸 Chat-嬛嬛")
-        st.markdown("""
-        欢迎来到甄嬛传角色对话系统！我是甄嬛，大理寺少卿甄远道之女。
-        臣妾愿与您畅谈宫廷生活、诗词歌赋，分享人生感悟。
-        """)
+        # 获取消息
+        if message_index >= len(st.session_state.messages):
+            return
         
-        # 角色信息卡片
-        with st.expander("📖 角色信息", expanded=False):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("""
-                **基本信息**
-                - 姓名：甄嬛（甄玉嬛）
-                - 身份：熹贵妃
-                - 出身：大理寺少卿甄远道之女
-                - 特长：诗词歌赋、琴棋书画
-                """)
-            
-            with col2:
-                st.markdown("""
-                **性格特点**
-                - 聪慧机智，善于应变
-                - 温婉贤淑，知书达理
-                - 坚韧不拔，重情重义
-                - 语言典雅，谦逊有礼
-                """)
+        message = st.session_state.messages[message_index]
+        if message['role'] != 'assistant':
+            return
         
-        # 示例问题
-        st.subheader("💡 示例问题")
-        example_questions = [
-            "你好，请介绍一下自己",
-            "你觉得宫廷生活如何？",
-            "如何看待友情？",
-            "能为我作一首诗吗？",
-            "给后人一些人生建议",
-            "你最喜欢什么？"
-        ]
+        # 生成反馈组件的唯一键
+        feedback_key = f"feedback_{message_index}"
         
-        cols = st.columns(3)
-        for i, question in enumerate(example_questions):
-            with cols[i % 3]:
-                if st.button(question, key=f"example_{i}", use_container_width=True):
-                    st.session_state.current_question = question
+        # 检查是否已经有反馈
+        if feedback_key in st.session_state.current_feedback:
+            st.success("✅ 感谢您的反馈！")
+            return
         
-        st.divider()
+        # 显示反馈组件
+        st.markdown("---")
+        st.markdown("#### 请对这个回答进行评价：")
         
-        # 对话历史
-        st.subheader("💬 对话历史")
+        # 评分
+        rating = st.radio(
+            "评分",
+            options=[("⭐", 1), ("⭐⭐", 2), ("⭐⭐⭐", 3), ("⭐⭐⭐⭐", 4), ("⭐⭐⭐⭐⭐", 5)],
+            format_func=lambda x: x[0],
+            key=f"rating_{message_index}",
+            horizontal=True
+        )
         
-        # 显示对话消息
-        for message in st.session_state.messages:
+        # 评论
+        comment = st.text_area(
+            "详细评论（可选）",
+            key=f"comment_{message_index}",
+            placeholder="您觉得这个回答怎么样？有什么建议吗？"
+        )
+        
+        # 提交按钮
+        if st.button("提交反馈", key=f"submit_{message_index}"):
+            if rating:
+                # 准备反馈数据
+                user_message = st.session_state.messages[message_index-1] if message_index > 0 else {"content": ""}
+                
+                feedback_data = {
+                    "session_id": st.session_state.session_id,
+                    "model_name": st.session_state.selected_model or "unknown",
+                    "user_input": user_message.get("content", ""),
+                    "model_response": message.get("content", ""),
+                    "rating": rating[1],  # 获取评分值
+                    "comment": comment
+                }
+                
+                # 保存反馈
+                if self.feedback_handler.save_feedback(feedback_data):
+                    # 记录已提交反馈
+                    st.session_state.current_feedback[feedback_key] = True
+                    st.success("✅ 感谢您的反馈！")
+                    st.rerun()
+                else:
+                    st.error("❌ 提交反馈失败，请重试")
+    
+    def render_chat_interface(self):
+        """
+        渲染聊天界面
+        """
+        # 显示聊天历史
+        for i, message in enumerate(st.session_state.messages):
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
+                
+                # 如果是助手回复，显示反馈部分
+                if message["role"] == "assistant":
+                    self.render_feedback_section(i)
         
-        # 处理示例问题
-        if hasattr(st.session_state, 'current_question'):
-            user_input = st.session_state.current_question
-            delattr(st.session_state, 'current_question')
-        else:
-            user_input = None
-        
-        # 聊天输入
-        if prompt := st.chat_input("请输入您的问题...") or user_input:
+        # 用户输入
+        if prompt := st.chat_input("与甄嬛对话..."):
             # 添加用户消息
             st.session_state.messages.append({"role": "user", "content": prompt})
             
+            # 显示用户消息
             with st.chat_message("user"):
                 st.markdown(prompt)
             
-            # 生成回复
-            with st.chat_message("assistant"):
-                with st.spinner("甄嬛正在思考..."):
-                    # 使用流式生成
-                    response_placeholder = st.empty()
-                    full_response = ""
+            # 获取模型回复
+            if st.session_state.selected_model:
+                with st.chat_message("assistant"):
+                    with st.spinner("甄嬛正在思考..."):
+                        response = self.chat_with_model(prompt, st.session_state.selected_model)
                     
-                    # 构建消息历史
-                    messages = []
-                    for msg in st.session_state.messages:
-                        messages.append({
-                            "role": msg["role"],
-                            "content": msg["content"]
-                        })
+                    st.markdown(response)
                     
-                    for chunk in self.stream_chat(messages, st.session_state.selected_model):
-                        full_response += chunk
-                        response_placeholder.markdown(full_response + "▌")
+                    # 添加助手回复到历史
+                    st.session_state.messages.append({"role": "assistant", "content": response})
                     
-                    response_placeholder.markdown(full_response)
-            
-            # 添加助手消息
-            st.session_state.messages.append({"role": "assistant", "content": full_response})
-            
-            # 保存到历史记录
-            st.session_state.chat_history.append({
-                "timestamp": datetime.now().isoformat(),
-                "user": prompt,
-                "assistant": full_response,
-                "params": {
-                    "temperature": st.session_state.temperature,
-                    "top_p": st.session_state.top_p,
-                    "top_k": st.session_state.top_k,
-                    "max_tokens": st.session_state.max_tokens
-                }
-            })
+                    # 显示反馈部分
+                    self.render_feedback_section(len(st.session_state.messages) - 1)
+            else:
+                st.warning("请先选择一个模型")
     
-    def save_chat_history(self):
+    def render_feedback_analysis(self):
         """
-        保存对话历史
+        渲染反馈分析页面
         """
-        if not st.session_state.chat_history:
-            return
+        st.title("📈 反馈分析")
         
-        # 创建保存目录
-        save_dir = Path("application/chat_history")
-        save_dir.mkdir(parents=True, exist_ok=True)
+        # 获取反馈统计数据
+        feedback_stats = self.feedback_handler.get_feedback_stats()
         
-        # 生成文件名
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"huanhuan_chat_{timestamp}.json"
-        filepath = save_dir / filename
-        
-        # 保存数据
-        save_data = {
-            "timestamp": timestamp,
-            "chat_history": st.session_state.chat_history,
-            "model_params": {
-                "selected_model": st.session_state.selected_model,
-                "temperature": st.session_state.temperature,
-                "top_p": st.session_state.top_p,
-                "top_k": st.session_state.top_k,
-                "max_tokens": st.session_state.max_tokens
-            }
-        }
-        
-        try:
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(save_data, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            st.error(f"保存失败: {e}")
-    
-    def load_chat_history(self):
-        """
-        加载对话历史
-        """
-        save_dir = Path("application/chat_history")
-        if not save_dir.exists():
-            st.warning("没有找到历史对话文件")
-            return
-        
-        # 获取所有历史文件
-        history_files = list(save_dir.glob("*.json"))
-        if not history_files:
-            st.warning("没有找到历史对话文件")
-            return
-        
-        # 选择文件
-        file_options = {f.name: f for f in sorted(history_files, reverse=True)}
-        selected_file = st.selectbox(
-            "选择要加载的对话:",
-            options=list(file_options.keys())
-        )
-        
-        if st.button("加载选中的对话"):
-            try:
-                with open(file_options[selected_file], 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                
-                st.session_state.chat_history = data.get('chat_history', [])
-                st.session_state.messages = []
-                
-                # 重建messages格式
-                for chat in st.session_state.chat_history:
-                    st.session_state.messages.append({"role": "user", "content": chat["user"]})
-                    st.session_state.messages.append({"role": "assistant", "content": chat["assistant"]})
-                
-                # 加载模型参数
-                if 'model_params' in data:
-                    params = data['model_params']
-                    if 'selected_model' in params:
-                        st.session_state.selected_model = params['selected_model']
-                    if 'temperature' in params:
-                        st.session_state.temperature = params['temperature']
-                    if 'top_p' in params:
-                        st.session_state.top_p = params['top_p']
-                    if 'top_k' in params:
-                        st.session_state.top_k = params['top_k']
-                    if 'max_tokens' in params:
-                        st.session_state.max_tokens = params['max_tokens']
-                
-                st.success(f"已加载对话: {selected_file}")
-                st.rerun()
-            except Exception as e:
-                st.error(f"加载失败: {e}")
-    
-    def get_history_files(self):
-        """
-        获取历史文件列表
-        """
-        save_dir = Path("application/chat_history")
-        if not save_dir.exists():
-            return []
-        
-        history_files = list(save_dir.glob("*.json"))
-        return sorted([f.name for f in history_files], reverse=True)
-    
-    def render_footer(self):
-        """
-        渲染页脚
-        """
-        st.divider()
-        
-        col1, col2, col3 = st.columns(3)
-        
+        # 显示总体统计
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.markdown("**📊 统计信息**")
-            st.metric("对话轮数", len(st.session_state.messages) // 2)
-        
+            st.metric("总反馈数", feedback_stats['total_feedback'])
         with col2:
-            st.markdown("**🔧 技术栈**")
-            st.markdown("Streamlit + Ollama + LoRA")
-        
+            st.metric("正面反馈", feedback_stats['positive_feedback'])
         with col3:
-            st.markdown("**📚 参考项目**")
-            st.markdown("[huanhuan-chat](https://github.com/KMnO4-zx/huanhuan-chat)")
+            st.metric("负面反馈", feedback_stats['negative_feedback'])
+        with col4:
+            st.metric("平均评分", feedback_stats['avg_rating'])
+        
+        st.progress(feedback_stats['positive_rate'], 
+                   f"正面反馈率: {feedback_stats['positive_rate']:.2%}")
+        
+        # 按模型分组的统计
+        st.subheader("各模型反馈统计")
+        model_stats = self.feedback_handler.get_feedback_by_model()
+        
+        if model_stats:
+            for model_name, stats in model_stats.items():
+                with st.expander(f"🤖 {model_name}"):
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("反馈数", stats['stats']['total'])
+                    with col2:
+                        st.metric("正面反馈", stats['stats']['positive'])
+                    with col3:
+                        st.metric("负面反馈", stats['stats']['negative'])
+                    with col4:
+                        st.metric("平均评分", stats['stats']['avg_rating'])
+        else:
+            st.info("暂无模型反馈数据")
+        
+        # 最近反馈
+        st.subheader("最近反馈")
+        recent_feedback = self.feedback_handler.get_recent_feedback(10)
+        
+        if recent_feedback:
+            for feedback in recent_feedback:
+                with st.expander(f"⭐ {feedback.get('rating', 0)}星 - {feedback.get('timestamp', '')}"):
+                    st.markdown(f"**模型**: {feedback.get('model_name', 'unknown')}")
+                    st.markdown(f"**用户输入**: {feedback.get('user_input', '')}")
+                    st.markdown(f"**模型回复**: {feedback.get('model_response', '')}")
+                    if feedback.get('comment'):
+                        st.markdown(f"**评论**: {feedback.get('comment', '')}")
+        else:
+            st.info("暂无反馈数据")
+    
+    def render_training_data_export(self):
+        """
+        渲染训练数据导出页面
+        """
+        st.title("📤 训练数据导出")
+        
+        st.markdown("""
+        本页面允许您将用户正面反馈导出为训练数据，用于模型的持续优化。
+        只有评分4星及以上的反馈会被导出。
+        """)
+        
+        # 获取反馈统计数据
+        feedback_stats = self.feedback_handler.get_feedback_stats()
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("总反馈数", feedback_stats['total_feedback'])
+        with col2:
+            st.metric("可用于训练的反馈数", 
+                     sum(1 for f in self.feedback_handler.load_feedback() if f.get('rating', 0) >= 4))
+        
+        # 导出选项
+        st.subheader("导出设置")
+        output_filename = st.text_input("输出文件名", "user_feedback_training_data.jsonl")
+        
+        # 导出按钮
+        if st.button("导出训练数据"):
+            try:
+                # 导出数据
+                training_data = self.feedback_handler.export_feedback_for_training(
+                    output_file=str(Path(__file__).parent.parent / "data" / output_filename)
+                )
+                
+                st.success(f"✅ 成功导出 {len(training_data)} 条训练数据到 {output_filename}")
+                
+                # 显示示例数据
+                if training_data:
+                    st.subheader("导出数据示例")
+                    for i, item in enumerate(training_data[:3]):
+                        st.markdown(f"**示例 {i+1}:**")
+                        st.json(item)
+            except Exception as e:
+                st.error(f"导出失败: {e}")
     
     def run(self):
         """
-        运行应用主方法
+        运行应用
         """
-        # 渲染侧边栏
-        self.render_sidebar()
+        # 页面选择
+        page = st.sidebar.radio("页面导航", ["💬 对话", "📈 反馈分析", "📤 训练数据导出"])
         
-        # 渲染主要内容
-        self.render_main_content()
-        
-        # 渲染页脚
-        self.render_footer()
+        if page == "💬 对话":
+            self.render_sidebar()
+            self.render_chat_interface()
+        elif page == "📈 反馈分析":
+            self.render_feedback_analysis()
+        elif page == "📤 训练数据导出":
+            self.render_training_data_export()
+
 
 def main():
     """
     主函数
     """
-    # 自定义CSS
-    st.markdown("""
-    <style>
-    .stApp {
-        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-    }
-    
-    .stChatMessage {
-        background-color: rgba(255, 255, 255, 0.8);
-        border-radius: 10px;
-        padding: 10px;
-        margin: 5px 0;
-    }
-    
-    .stButton > button {
-        border-radius: 20px;
-        border: none;
-        background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
-        color: white;
-    }
-    
-    .stButton > button:hover {
-        background: linear-gradient(45deg, #764ba2 0%, #667eea 100%);
-        transform: translateY(-2px);
-        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    # 创建并运行应用
     app = HuanHuanWebApp()
     app.run()
+
 
 if __name__ == "__main__":
     main()

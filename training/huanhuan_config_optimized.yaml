@@ -1,0 +1,175 @@
+# 甄嬛传优化训练配置文件
+# 针对数据增强后的数据集进行优化配置
+
+# 模型配置
+model:
+  base_model: "Qwen/Qwen2.5-0.5B"             # 基础模型
+  model_name: "huanhuan-chat-optimized"       # 模型名称
+  max_length: 2048                            # 最大序列长度
+  trust_remote_code: true
+
+# 训练参数 - 优化配置
+training:
+  output_dir: "../training/models/huanhuan_optimized"  # 优化模型输出目录
+  num_train_epochs: 5                         # 增加训练轮数以充分学习
+  per_device_train_batch_size: 4              # 增加批次大小提高训练效率
+  per_device_eval_batch_size: 4               # 增加评估批次大小
+  gradient_accumulation_steps: 4              # 调整梯度累积步数
+  learning_rate: 3e-4                         # 优化学习率 (原为1e-3)
+  weight_decay: 0.01                          # 权重衰减
+  warmup_ratio: 0.1                           # 预热比例
+  max_grad_norm: 1.0                          # 梯度裁剪
+  lr_scheduler_type: "cosine"                 # 使用cosine学习率调度
+  
+  # 保存和评估
+  save_steps: 200                             # 保存间隔 (原为100)
+  eval_steps: 200                             # 评估间隔 (原为50)
+  logging_steps: 50                           # 日志间隔 (原为10)
+  evaluation_strategy: "steps"
+  save_strategy: "steps"
+  
+  # 早停和最佳模型
+  load_best_model_at_end: true
+  metric_for_best_model: "eval_loss"
+  greater_is_better: false
+  save_total_limit: 3                         # 保留最近3个检查点
+  early_stopping_patience: 3                  # 早停耐心值
+  
+  # 设备和内存优化
+  dataloader_num_workers: 2                   # 数据加载器工作进程数
+  remove_unused_columns: false
+  gradient_checkpointing: true                # 启用梯度检查点节省内存
+  fp16: false                                 # 根据设备情况启用半精度
+  dataloader_pin_memory: true                 # 固定内存
+
+# LoRA配置 - 优化版
+lora:
+  r: 8                                        # 增加LoRA秩至8 (原为2)
+  lora_alpha: 16                              # 调整alpha值 (原为4)
+  target_modules:                             # 扩展目标模块
+    - "q_proj"
+    - "k_proj" 
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+  lora_dropout: 0.05                          # 减少dropout (原为0.1)
+  bias: "none"
+  task_type: "CAUSAL_LM"
+  fan_in_fan_out: false
+
+# 数据配置
+data:
+  train_file: "../data/processed/augmented_train.jsonl"  # 使用增强后的数据
+  validation_file: "../data/processed/validation.jsonl"
+  test_file: "../data/processed/test.jsonl"
+  max_source_length: 512                      # 增加输入最大长度
+  max_target_length: 512                      # 增加输出最大长度
+  ignore_pad_token_for_loss: true
+
+# 生成参数
+generation:
+  max_new_tokens: 512                         # 增加生成长度
+  temperature: 0.7                            # 生成温度
+  top_p: 0.92                                 # top-p采样
+  top_k: 50                                   # top-k采样
+  do_sample: true
+  repetition_penalty: 1.1                     # 重复惩罚
+  pad_token_id: 151643
+  eos_token_id: 151643
+
+# 角色特定配置
+character:
+  name: "甄嬛"
+  aliases:
+    - "嬛嬛"
+    - "甄小主"
+    - "熹妃"
+    - "熹贵妃"
+  
+  personality:
+    - "聪慧机智"
+    - "温婉贤淑"
+    - "坚韧不拔"
+    - "重情重义"
+    - "知书达理"
+  
+  language_style:
+    - "古典雅致"
+    - "谦逊有礼"
+    - "情感丰富"
+    - "用词考究"
+  
+  background: |
+    甄嬛，大理寺少卿甄远道之女，因容貌酷似纯元皇后而被选中入宫。
+    性情温和，知书达理，擅长诗词歌赋。在宫廷斗争中逐渐成长，
+    最终成为深受皇帝宠爱的熹贵妃。
+
+# 系统配置
+system:
+  device: "auto"                              # 自动设备选择
+  seed: 42                                    # 随机种子
+  dataloader_num_workers: 2                   # 数据加载器工作进程数
+  gradient_checkpointing: true                # 梯度检查点
+  dataloader_pin_memory: true                 # 固定内存
+
+# 评估配置
+evaluation:
+  eval_strategy: "steps"
+  eval_steps: 200
+  per_device_eval_batch_size: 4
+  
+  # 评估指标
+  metrics:
+    - "loss"
+    - "perplexity"
+
+# 特殊功能
+special_features:
+  character_consistency_check: true
+  consistency_keywords:
+    - "臣妾"
+    - "皇上"
+    - "娘娘"
+    - "便是"
+    - "倒是"
+  
+  quality_filter:
+    min_length: 20                            # 增加最小长度要求
+    max_repetition_ratio: 0.25                # 降低最大重复比例
+    forbidden_words: []
+
+# 数据增强
+data_augmentation:
+  enable: true
+  synonym_replacement:
+    enable: true
+    ratio: 0.15                             # 增加替换比例
+  tone_word_insertion:
+    enable: true
+    words: ["呢", "啊", "呀", "吧", "嘛", "矣"]
+    ratio: 0.1
+
+# 后处理
+post_processing:
+  text_cleaning:
+    remove_extra_spaces: true
+    remove_special_chars: false
+    normalize_punctuation: true
+  formatting:
+    add_special_tokens: true
+    max_length_truncation: true
+
+# 部署配置
+deployment:
+  ollama:
+    model_name: "huanhuan-chat-optimized"
+    base_model: "qwen2.5:0.5b"
+    parameters:
+      temperature: 0.7
+      top_p: 0.92
+      top_k: 50
+      repeat_penalty: 1.1
+      num_ctx: 2048
+      num_predict: 768

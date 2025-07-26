@@ -408,9 +408,22 @@ def main():
     """
     主函数：执行甄嬛角色模型训练
     """
+    import argparse
+    
+    # 解析命令行参数
+    parser = argparse.ArgumentParser(description="甄嬛角色模型训练")
+    parser.add_argument(
+        "config_file", 
+        nargs="?", 
+        default="./huanhuan_config_fast.yaml",
+        help="配置文件路径 (默认: ./huanhuan_config_fast.yaml)"
+    )
+    
+    args = parser.parse_args()
+    
     try:
-        # 创建训练器实例
-        trainer = HuanHuanTrainer()
+        # 创建训练器实例，使用指定的配置文件
+        trainer = HuanHuanTrainer(config_path=args.config_file)
         
         # 训练模型
         train_result = trainer.train()

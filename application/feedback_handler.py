@@ -3,15 +3,14 @@
 """
 用户反馈处理模块
 
-用于收集、存储和分析用户对模型输出的反馈
+处理用户对模型回复的反馈，包括满意度评分和建议
 """
 
 import json
-import os
+import uuid
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Dict, Any, List, Optional
 from datetime import datetime
-import numpy as np
 from loguru import logger
 
 
@@ -20,22 +19,33 @@ class FeedbackHandler:
     用户反馈处理器
     """
     
-    def __init__(self, feedback_file: str = "../data/user_feedback.json"):
+    def __init__(self, feedback_file: str = None):
         """
         初始化反馈处理器
         
         Args:
             feedback_file: 反馈数据存储文件路径
         """
-        self.feedback_file = Path(__file__).parent / feedback_file
+        # 如果未指定反馈文件，则使用项目根目录下的data目录
+        if feedback_file is None:
+            # 获取当前脚本所在目录的父级目录作为项目根目录
+            script_dir = Path(__file__).parent
+            project_root = script_dir.parent
+            self.feedback_file = project_root / "data" / "user_feedback.json"
+        else:
+            self.feedback_file = Path(__file__).parent / feedback_file
+            
         self.ensure_feedback_file_exists()
     
     def ensure_feedback_file_exists(self):
         """
         确保反馈文件存在
         """
+        # 确保目录存在
+        self.feedback_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        # 如果文件不存在，创建一个空的JSON数组
         if not self.feedback_file.exists():
-            # 创建空的反馈文件
             with open(self.feedback_file, 'w', encoding='utf-8') as f:
                 json.dump([], f, ensure_ascii=False, indent=2)
             logger.info(f"创建反馈文件: {self.feedback_file}")
@@ -48,85 +58,71 @@ class FeedbackHandler:
             feedback_data: 反馈数据
             
         Returns:
-            保存是否成功
+            bool: 是否保存成功
         """
         try:
             # 读取现有反馈数据
-            feedback_list = self.load_feedback()
+            with open(self.feedback_file, 'r', encoding='utf-8') as f:
+                feedback_list = json.load(f)
             
-            # 添加时间戳
-            feedback_data['timestamp'] = datetime.now().isoformat()
+            # 添加反馈ID和时间戳
+            feedback_entry = {
+                "id": str(uuid.uuid4()),
+                "timestamp": datetime.now().isoformat(),
+                **feedback_data
+            }
             
             # 添加到反馈列表
-            feedback_list.append(feedback_data)
+            feedback_list.append(feedback_entry)
             
-            # 保存到文件
+            # 保存回文件
             with open(self.feedback_file, 'w', encoding='utf-8') as f:
                 json.dump(feedback_list, f, ensure_ascii=False, indent=2)
             
-            logger.info(f"保存用户反馈成功: {feedback_data.get('session_id', 'unknown')}")
+            logger.info(f"保存反馈成功: {feedback_entry['id']}")
             return True
+            
         except Exception as e:
-            logger.error(f"保存用户反馈失败: {e}")
+            logger.error(f"保存反馈失败: {e}")
             return False
     
-    def load_feedback(self) -> List[Dict[str, Any]]:
-        """
-        加载所有反馈数据
-        
-        Returns:
-            反馈数据列表
-        """
-        try:
-            with open(self.feedback_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            logger.error(f"加载反馈数据失败: {e}")
-            return []
     
     def get_feedback_stats(self) -> Dict[str, Any]:
         """
         获取反馈统计信息
         
         Returns:
-            反馈统计信息
+            Dict[str, Any]: 统计信息
         """
-        feedback_list = self.load_feedback()
-        
-        if not feedback_list:
-            return {
-                'total_feedback': 0,
-                'positive_feedback': 0,
-                'negative_feedback': 0,
-                'positive_rate': 0.0,
-                'avg_rating': 0.0
-            }
-        
-        # 统计各类反馈
-        positive_count = 0
-        negative_count = 0
-        total_rating = 0
-        
-        for feedback in feedback_list:
-            rating = feedback.get('rating', 0)
-            if rating > 3:  # 4-5星为正面反馈
-                positive_count += 1
-            elif rating <= 3:  # 1-3星为负面反馈
-                negative_count += 1
+        try:
+            feedback_list = self.get_all_feedback()
             
-            total_rating += rating
-        
-        total_count = len(feedback_list)
-        positive_rate = positive_count / total_count if total_count > 0 else 0
-        avg_rating = total_rating / total_count if total_count > 0 else 0
-        
-        return {
-            'total_feedback': total_count,
-            'positive_feedback': positive_count,
-            'negative_feedback': negative_count,
-            'positive_rate': round(positive_rate, 4),
-            'avg_rating': round(avg_rating, 2)
-        }
+            if not feedback_list:
+                return {
+                    "total_feedback": 0,
+                    "avg_rating": 0,
+                    "rating_distribution": {}
+                }
+            
+            # 计算统计数据
+            ratings = [f.get('rating', 0) for f in feedback_list if 'rating' in f]
+            total_feedback = len(feedback_list)
+            avg_rating = sum(ratings) / len(ratings) if ratings else 0
+            
+            # 评分分布
+            rating_distribution = {}
+            for rating in range(1, 6):
+                rating_distribution[str(rating)] = ratings.count(rating)
+            
+            return {
+                "total_feedback": total_count,
+                "avg_rating": round(avg_rating, 2),
+                "rating_distribution": rating_distribution
+            }
+            
+        except Exception as e:
+            logger.error(f"获取反馈统计失败: {e}")
+            return {}
     
     def get_feedback_by_model(self) -> Dict[str, Dict[str, Any]]:
         """
@@ -173,22 +169,6 @@ class FeedbackHandler:
         
         return model_feedback
     
-    def get_recent_feedback(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """
-        获取最近的反馈
-        
-        Args:
-            limit: 限制返回的数量
-            
-        Returns:
-            最近的反馈列表
-        """
-        feedback_list = self.load_feedback()
-        
-        # 按时间排序
-        feedback_list.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
-        
-        return feedback_list[:limit]
     
     def analyze_feedback_patterns(self) -> Dict[str, Any]:
         """
@@ -266,35 +246,26 @@ class FeedbackHandler:
 
 
 def main():
-    """
-    主函数 - 用于测试反馈处理器
-    """
+    """主函数 - 用于测试"""
     handler = FeedbackHandler()
     
-    # 示例反馈数据
-    sample_feedback = {
-        'session_id': 'test_session_001',
-        'model_name': 'huanhuan-qwen-optimized',
-        'user_input': '你好，你是谁？',
-        'model_response': '臣妾是甄嬛，大理寺少卿甄远道之女。',
-        'rating': 5,
-        'comment': '回答很符合角色设定'
+    # 测试保存反馈
+    test_feedback = {
+        "session_id": "test_session_123",
+        "message": "这是一条测试消息",
+        "response": "这是模型的回复",
+        "rating": 5,
+        "comment": "测试反馈"
     }
     
-    # 保存反馈
-    handler.save_feedback(sample_feedback)
+    if handler.save_feedback(test_feedback):
+        print("✅ 反馈保存成功")
+    else:
+        print("❌ 反馈保存失败")
     
-    # 获取统计信息
+    # 测试获取统计信息
     stats = handler.get_feedback_stats()
-    print("反馈统计:", stats)
-    
-    # 获取按模型分组的统计
-    model_stats = handler.get_feedback_by_model()
-    print("按模型分组统计:", model_stats)
-    
-    # 分析反馈模式
-    patterns = handler.analyze_feedback_patterns()
-    print("反馈模式分析:", patterns)
+    print(f"📊 反馈统计: {stats}")
 
 
 if __name__ == "__main__":

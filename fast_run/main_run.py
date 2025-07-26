@@ -267,7 +267,9 @@ def step3_finetune_model(config: Dict[str, Any]):
     print("\n🤖 步骤3: 微调模型")
     # 使用配置文件进行训练
     config_file = config["model_training"]["config_file"]
-    command = f"python training/huanhuan_train.py"
+    # 确保使用相对于项目根目录的路径
+    config_file_path = project_root / config_file
+    command = f"python training/huanhuan_train.py {config_file_path}"
     return run_command(command, "微调模型", cwd=project_root)
 
 def step4_convert_model(config: Dict[str, Any]):

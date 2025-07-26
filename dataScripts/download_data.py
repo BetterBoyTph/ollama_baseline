@@ -13,14 +13,23 @@ import requests
 from pathlib import Path
 from tqdm import tqdm
 from loguru import logger
+import sys
 
 class HuanHuanDataDownloader:
     """
     甄嬛传数据下载器
     """
     
-    def __init__(self, data_dir: str = "../data"):
-        self.data_dir = Path(data_dir)
+    def __init__(self, data_dir: str = None):
+        # 如果未指定数据目录，则使用项目根目录下的data目录
+        if data_dir is None:
+            # 获取当前脚本所在目录的父级目录作为项目根目录
+            script_dir = Path(__file__).parent
+            project_root = script_dir.parent
+            self.data_dir = project_root / "data"
+        else:
+            self.data_dir = Path(data_dir)
+            
         self.raw_dir = self.data_dir / "raw"
         
         # 创建目录
@@ -84,10 +93,20 @@ class HuanHuanDataDownloader:
     
 def main():
     """主函数"""
-    downloader = HuanHuanDataDownloader()
+    # 解析命令行参数
+    import argparse
+    parser = argparse.ArgumentParser(description="甄嬛传数据下载脚本")
+    parser.add_argument(
+        "--data-dir",
+        help="数据存储目录 (默认: 项目根目录下的data目录)"
+    )
+    
+    args = parser.parse_args()
+    
+    downloader = HuanHuanDataDownloader(data_dir=args.data_dir)
     
     if not downloader.run():
-        exit(1)
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

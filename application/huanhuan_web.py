@@ -428,6 +428,11 @@ class HuanHuanWebApp:
             
             # 初始化当前回复的反馈状态
             st.session_state.current_feedback[len(st.session_state.messages) - 1] = None
+            
+            # 立即显示新生成回复的反馈界面
+            # 重新渲染最新消息的反馈部分
+            latest_message_index = len(st.session_state.messages) - 1
+            st.session_state.current_feedback[latest_message_index] = None
     
     def save_message_feedback(self, message_index, rating, messages):
         """

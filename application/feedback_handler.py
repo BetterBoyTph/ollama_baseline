@@ -50,6 +50,21 @@ class FeedbackHandler:
                 json.dump([], f, ensure_ascii=False, indent=2)
             logger.info(f"创建反馈文件: {self.feedback_file}")
     
+    def load_feedback(self) -> List[Dict[str, Any]]:
+        """
+        加载所有反馈数据
+        
+        Returns:
+            List[Dict[str, Any]]: 反馈数据列表
+        """
+        try:
+            with open(self.feedback_file, 'r', encoding='utf-8') as f:
+                feedback_list = json.load(f)
+            return feedback_list
+        except Exception as e:
+            logger.error(f"加载反馈数据失败: {e}")
+            return []
+    
     def save_feedback(self, feedback_data: Dict[str, Any]) -> bool:
         """
         保存用户反馈
@@ -86,7 +101,6 @@ class FeedbackHandler:
             logger.error(f"保存反馈失败: {e}")
             return False
     
-    
     def get_feedback_stats(self) -> Dict[str, Any]:
         """
         获取反馈统计信息
@@ -95,11 +109,14 @@ class FeedbackHandler:
             Dict[str, Any]: 统计信息
         """
         try:
-            feedback_list = self.get_all_feedback()
+            feedback_list = self.load_feedback()
             
             if not feedback_list:
                 return {
                     "total_feedback": 0,
+                    "positive_feedback": 0,
+                    "negative_feedback": 0,
+                    "positive_rate": 0.0,
                     "avg_rating": 0,
                     "rating_distribution": {}
                 }
@@ -107,6 +124,9 @@ class FeedbackHandler:
             # 计算统计数据
             ratings = [f.get('rating', 0) for f in feedback_list if 'rating' in f]
             total_feedback = len(feedback_list)
+            positive_feedback = sum(1 for f in feedback_list if f.get('rating', 0) >= 4)
+            negative_feedback = total_feedback - positive_feedback
+            positive_rate = positive_feedback / total_feedback if total_feedback > 0 else 0
             avg_rating = sum(ratings) / len(ratings) if ratings else 0
             
             # 评分分布
@@ -115,14 +135,24 @@ class FeedbackHandler:
                 rating_distribution[str(rating)] = ratings.count(rating)
             
             return {
-                "total_feedback": total_count,
+                "total_feedback": total_feedback,
+                "positive_feedback": positive_feedback,
+                "negative_feedback": negative_feedback,
+                "positive_rate": positive_rate,
                 "avg_rating": round(avg_rating, 2),
                 "rating_distribution": rating_distribution
             }
             
         except Exception as e:
             logger.error(f"获取反馈统计失败: {e}")
-            return {}
+            return {
+                "total_feedback": 0,
+                "positive_feedback": 0,
+                "negative_feedback": 0,
+                "positive_rate": 0.0,
+                "avg_rating": 0,
+                "rating_distribution": {}
+            }
     
     def get_feedback_by_model(self) -> Dict[str, Dict[str, Any]]:
         """

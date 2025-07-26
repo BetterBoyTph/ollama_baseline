@@ -65,41 +65,30 @@ class FeedbackHandler:
             logger.error(f"加载反馈数据失败: {e}")
             return []
     
-    def save_feedback(self, feedback_data: Dict[str, Any]) -> bool:
+    def get_recent_feedback(self, limit: int = 10) -> List[Dict[str, Any]]:
         """
-        保存用户反馈
+        获取最近的反馈数据
         
         Args:
-            feedback_data: 反馈数据
+            limit: 限制返回的反馈数量
             
         Returns:
-            bool: 是否保存成功
+            List[Dict[str, Any]]: 最近的反馈数据列表
         """
         try:
-            # 读取现有反馈数据
-            with open(self.feedback_file, 'r', encoding='utf-8') as f:
-                feedback_list = json.load(f)
+            feedback_list = self.load_feedback()
             
-            # 添加反馈ID和时间戳
-            feedback_entry = {
-                "id": str(uuid.uuid4()),
-                "timestamp": datetime.now().isoformat(),
-                **feedback_data
-            }
+            # 按时间戳排序并取最近的几条
+            sorted_feedback = sorted(
+                feedback_list, 
+                key=lambda x: x.get('timestamp', ''), 
+                reverse=True
+            )
             
-            # 添加到反馈列表
-            feedback_list.append(feedback_entry)
-            
-            # 保存回文件
-            with open(self.feedback_file, 'w', encoding='utf-8') as f:
-                json.dump(feedback_list, f, ensure_ascii=False, indent=2)
-            
-            logger.info(f"保存反馈成功: {feedback_entry['id']}")
-            return True
-            
+            return sorted_feedback[:limit]
         except Exception as e:
-            logger.error(f"保存反馈失败: {e}")
-            return False
+            logger.error(f"获取最近反馈失败: {e}")
+            return []
     
     def get_feedback_stats(self) -> Dict[str, Any]:
         """

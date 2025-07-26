@@ -73,7 +73,9 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 # 添加项目根目录到Python路径
-project_root = Path(__file__).parent
+# 获取当前脚本所在目录的父级目录作为项目根目录
+script_dir = Path(__file__).parent
+project_root = script_dir.parent
 sys.path.insert(0, str(project_root))
 
 # 默认配置
@@ -146,6 +148,7 @@ def run_command(command, description, cwd=None, timeout=None):
     print(f"\n{'='*60}")
     print(f"正在执行: {description}")
     print(f"命令: {command}")
+    print(f"工作目录: {cwd or '当前目录'}")
     print(f"{'='*60}")
     
     try:
@@ -418,6 +421,7 @@ def main():
     """
     print("🎭 甄嬛传角色对话系统 - 一键运行脚本")
     print("适用于Linux Ubuntu系统，RTX 3090显卡，AutoDL服务器实例")
+    print(f"项目根目录: {project_root}")
     
     parser = argparse.ArgumentParser(
         description="甄嬛传角色对话系统一键运行脚本",

@@ -1,42 +1,9 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-甄嬛角色Web对话界面
 
-基于Streamlit的甄嬛角色对话Web应用
-参考: https://github.com/KMnO4-zx/huanhuan-chat
-
-使用方法:
-    streamlit run application/huanhuan_web.py
-    streamlit run application/huanhuan_web.py --server.port 8501
-"""
-
-import os
-import sys
-import json
-import requests
 import streamlit as st
 from feedback_handler import FeedbackHandler
 
 # 初始化FeedbackHandler
 feedback_handler = FeedbackHandler()
-
-# 假设这是模型调用函数（实际实现根据具体需求）
-def get_model_response(input_text: str) -> str:
-    """
-    调用模型获取回复
-    
-    Args:
-        input_text: 用户输入的问题
-        
-    Returns:
-        str: 模型的回复
-    """
-    # 这里是模型调用的示例实现，实际应替换为真实模型调用逻辑
-    return f"模型回复: {input_text}"
-
-# 用于存储对话历史的列表
-conversation_history = []
 
 def main():
     st.title("Chat-嬛嬛")
@@ -64,36 +31,30 @@ def main():
         if cols[i % 3].button(question):
             # 处理示例问题点击事件
             st.write(f"你问了: {question}")
-            # 调用模型获取回复
-            model_response = get_model_response(question)
-            st.write(model_response)
-
-            # 保存对话历史
-            conversation_history.append({"user": question, "model": model_response})
+            # 这里应该调用模型获取回复
+            # model_response = get_model_response(question)
+            # st.write(model_response)
 
     # 对话历史
     st.subheader("对话历史")
-    # 显示之前的对话记录
-    for message in conversation_history:
-        st.write(f"用户: {message['user']}")
-        st.write(f"模型: {message['model']}")
+    # 这里应该显示之前的对话记录
+    # conversation_history = get_conversation_history()
+    # for message in conversation_history:
+    #     st.write(message)
 
     # 用户输入框
     user_input = st.text_input("请输入您的问题...", "")
     if st.button("提交"):
         if user_input:
             st.write(f"你问了: {user_input}")
-            # 调用模型获取回复
-            model_response = get_model_response(user_input)
-            st.write(model_response)
-
-            # 保存对话历史
-            conversation_history.append({"user": user_input, "model": model_response})
+            # 这里应该调用模型获取回复
+            # model_response = get_model_response(user_input)
+            # st.write(model_response)
 
             # 保存反馈（示例）
             feedback_data = {
                 "user_input": user_input,
-                "model_response": model_response,  # 使用模型的真实回复
+                "model_response": "这是模型的回复",  # 实际上应该是模型的真实回复
                 "rating": 5,  # 示例评分
                 "comment": "测试反馈"  # 示例评论
             }

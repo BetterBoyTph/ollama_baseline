@@ -50,6 +50,41 @@ class FeedbackHandler:
                 json.dump([], f, ensure_ascii=False, indent=2)
             logger.info(f"创建反馈文件: {self.feedback_file}")
     
+    def save_feedback(self, feedback_data: Dict[str, Any]) -> bool:
+        """
+        保存用户反馈
+        
+        Args:
+            feedback_data: 反馈数据
+            
+        Returns:
+            bool: 是否保存成功
+        """
+        try:
+            # 读取现有反馈数据
+            feedback_list = self.load_feedback()
+            
+            # 添加反馈ID和时间戳
+            feedback_entry = {
+                "id": str(uuid.uuid4()),
+                "timestamp": datetime.now().isoformat(),
+                **feedback_data
+            }
+            
+            # 添加到反馈列表
+            feedback_list.append(feedback_entry)
+            
+            # 保存回文件
+            with open(self.feedback_file, 'w', encoding='utf-8') as f:
+                json.dump(feedback_list, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"保存反馈成功: {feedback_entry['id']}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"保存反馈失败: {e}")
+            return False
+    
     def load_feedback(self) -> List[Dict[str, Any]]:
         """
         加载所有反馈数据

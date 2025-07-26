@@ -85,8 +85,9 @@ class HuanHuanWebApp:
         if 'chat_history' not in st.session_state:
             st.session_state.chat_history = []
         
-        # 反馈相关状态
+        # 反馈相关状态 - 存储当前对话中各消息的反馈评分
         if 'current_feedback' not in st.session_state:
+            # 格式: {message_index: rating}
             st.session_state.current_feedback = {}
         
         # 会话ID
@@ -355,8 +356,8 @@ class HuanHuanWebApp:
                     # 获取消息索引（助手消息在奇数位置）
                     message_index = i
                     
-                    # 创建反馈区域
-                    feedback_key = f"feedback_{message_index}"
+                    # 确保反馈状态已初始化
+                    self.init_message_feedback_state(message_index)
                     
                     # 显示已有的反馈状态
                     if st.session_state.current_feedback.get(message_index) is not None:
@@ -427,12 +428,21 @@ class HuanHuanWebApp:
             })
             
             # 初始化当前回复的反馈状态
-            st.session_state.current_feedback[len(st.session_state.messages) - 1] = None
-            
-            # 立即显示新生成回复的反馈界面
-            # 重新渲染最新消息的反馈部分
             latest_message_index = len(st.session_state.messages) - 1
-            st.session_state.current_feedback[latest_message_index] = None
+            self.init_message_feedback_state(latest_message_index)
+            
+            # 刷新页面以显示新消息及其反馈界面
+            st.rerun()
+    
+    def init_message_feedback_state(self, message_index):
+        """
+        初始化特定消息的反馈状态
+        
+        Args:
+            message_index: 消息索引
+        """
+        if message_index not in st.session_state.current_feedback:
+            st.session_state.current_feedback[message_index] = None
     
     def save_message_feedback(self, message_index, rating, messages):
         """
@@ -457,10 +467,15 @@ class HuanHuanWebApp:
             if message_index < len(messages) and messages[message_index]["role"] == "assistant":
                 model_response = messages[message_index]["content"]
             
+            # 获取当前使用的模型名称
+            current_model = st.session_state.get("selected_model", self.model_name)
+            if current_model is None:
+                current_model = "unknown_model"
+            
             # 构造反馈数据
             feedback_data = {
                 "session_id": st.session_state.get("session_id", str(datetime.now().timestamp())),
-                "model_name": st.session_state.selected_model,
+                "model_name": current_model,
                 "user_input": user_input,
                 "model_response": model_response,
                 "rating": rating,
@@ -474,6 +489,11 @@ class HuanHuanWebApp:
             success = self.feedback_handler.save_feedback(feedback_data)
             if success:
                 st.success("感谢您的反馈！")
+                # 更新反馈状态
+                st.session_state.current_feedback[message_index] = rating
+                # 延迟刷新以显示成功消息
+                time.sleep(1)
+                st.rerun()
             else:
                 st.error("反馈保存失败，请重试。")
                 

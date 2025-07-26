@@ -48,19 +48,9 @@ script_dir = Path(__file__).parent
 log_dir = script_dir / "logs"
 log_dir.mkdir(exist_ok=True)
 
-# 从配置中获取日志文件路径
-log_file = config.get('logging', {}).get('log_file', str(log_dir / "training.log"))
-# 如果是相对路径，则基于项目根目录进行解析
-if log_file.startswith("..") or not os.path.isabs(log_file):
-    # 获取项目根目录（training目录的上级目录）
-    project_root = script_dir.parent
-    # 构建相对于项目根目录的路径
-    log_file_path = project_root / "training" / "logs" / Path(log_file).name
-    log_file = str(log_file_path)
-
-logger.add(log_file, rotation="10 MB", retention="7 days", level="INFO")
-
-
+# 先加载配置以获取日志文件路径
+# 注意：此处需要先加载部分配置来设置日志，完整的配置在HuanHuanTrainer中加载
+logger.add(str(log_dir / "training.log"), rotation="10 MB", retention="7 days", level="INFO")
 
 class HuanHuanDataset(Dataset):
     """
@@ -172,6 +162,7 @@ class HuanHuanTrainer:
         
         # 初始化所有组件
         self.load_config()
+        self.setup_logging()  # 设置日志
         self.setup_device()
         self.load_model_and_tokenizer()
         self.setup_lora()
@@ -201,6 +192,31 @@ class HuanHuanTrainer:
         except Exception as e:
             logger.error(f"配置文件加载失败: {e}")
             raise
+    
+    def setup_logging(self):
+        """
+        设置训练日志
+        """
+        try:
+            # 从配置中获取日志文件路径
+            log_file = self.config.get('logging', {}).get('log_file', None)
+            if log_file:
+                # 如果是相对路径，则基于项目根目录进行解析
+                if log_file.startswith("..") or not os.path.isabs(log_file):
+                    # 获取项目根目录（training目录的上级目录）
+                    script_dir = Path(__file__).parent
+                    project_root = script_dir.parent
+                    # 构建相对于项目根目录的路径
+                    log_file_path = project_root / "training" / "logs" / Path(log_file).name
+                    log_file = str(log_file_path)
+                
+                # 添加文件日志处理器
+                log_dir = Path(log_file).parent
+                log_dir.mkdir(exist_ok=True)
+                logger.add(log_file, rotation="10 MB", retention="7 days", level="INFO")
+                logger.info(f"日志文件已配置: {log_file}")
+        except Exception as e:
+            logger.warning(f"日志配置失败: {e}")
     
     def setup_device(self):
         """

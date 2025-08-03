@@ -52,22 +52,32 @@ log_dir.mkdir(exist_ok=True)
 # 注意：此处需要先加载部分配置来设置日志，完整的配置在HuanHuanTrainer中加载
 logger.add(str(log_dir / "training.log"), rotation="10 MB", retention="7 days", level="INFO")
 
+def resolve_path(path_str: str) -> Path:
+    """
+    解析路径，将相对路径转换为绝对路径
+    
+    Args:
+        path_str: 路径字符串
+
+    Returns:
+        解析后的路径
+    """
+    path = Path(path_str)
+    if path.is_absolute():
+        return path
+    else:
+        # 对于相对路径，基于 script_dir 解析
+        return (script_dir / path).resolve()
+
 class HuanHuanDataset(Dataset):
     """
     甄嬛角色对话数据集
     """
     
     def __init__(self, data_file: str, tokenizer, max_length: int = 512):
-        # 如果是相对路径，则基于项目根目录进行解析
-        if data_file.startswith("..") or not os.path.isabs(data_file):
-            # 获取项目根目录（training目录的上级目录）
-            script_dir = Path(__file__).parent
-            project_root = script_dir.parent
-            # 从配置文件路径中提取文件名
-            data_filename = Path(data_file).name
-            # 构建相对于项目根目录的路径
-            data_file_path = project_root / "data" / "processed" / data_filename
-            data_file = str(data_file_path)
+        # 解析数据文件路径
+        data_file_path = resolve_path(data_file)
+        data_file = str(data_file_path)
             
         self.tokenizer = tokenizer
         self.max_length = max_length
@@ -120,7 +130,7 @@ class HuanHuanDataset(Dataset):
             full_text,
             truncation=True,
             max_length=self.max_length,
-            padding='max_length',
+            padding=False, # 处理单条样本可以不填充，在data_collator中处理多条样本时会自动进行长度填充
             return_tensors='pt'
         )
         
@@ -137,6 +147,48 @@ class HuanHuanDataset(Dataset):
         prompt_length = len(prompt_encoding['input_ids'][0])
         labels[0, :prompt_length] = -100  # 忽略prompt部分的损失
         
+        # 打印前几个样本的调试信息以验证labels处理是否正确
+        if idx < 3:  # 只打印前3个样本
+            # 保存当前的打印选项
+            original_print_options = torch._tensor_str.PRINT_OPTS
+            
+            # 设置新的打印选项以显示完整tensor
+            torch.set_printoptions(threshold=10_000, linewidth=120, sci_mode=False)
+            
+            print(f"\n=== 样本 {idx} 调试信息 ===")
+            print(f"完整文本: {full_text}")
+            print(f"提示文本: {prompt}")
+            print(f"提示长度 (tokens): {prompt_length}")
+            print(f"完整输入ID: {encoding['input_ids']}")
+            print(f"提示输入ID: {prompt_encoding['input_ids']}")
+            print(f"处理前的标签: {encoding['input_ids']}")
+            print(f"处理后的标签: {labels}")
+            # 检查被标记为-100的位置
+            ignore_positions = (labels[0] == -100).nonzero(as_tuple=True)[0]
+            print(f"被忽略的位置: {ignore_positions}")
+            print(f"被忽略的token数量: {len(ignore_positions)}")
+            
+            # 如果使用了left padding，检查实际内容位置
+            pad_token_id = self.tokenizer.pad_token_id
+            if pad_token_id is not None:
+                pad_positions = (encoding['input_ids'][0] == pad_token_id).nonzero(as_tuple=True)[0]
+                content_positions = (encoding['input_ids'][0] != pad_token_id).nonzero(as_tuple=True)[0]
+                print(f"Pad token ID: {pad_token_id}")
+                print(f"Pad token位置: {pad_positions}")
+                print(f"内容位置: {content_positions}")
+                if len(content_positions) > 0:
+                    print(f"第一个内容token位置: {content_positions[0]}")
+                    print(f"预期的prompt结束位置: {content_positions[0] + prompt_length - 1}")
+            
+            print("========================\n")
+            
+            # 恢复原始打印选项
+            torch.set_printoptions(
+                threshold=original_print_options.threshold,
+                linewidth=original_print_options.linewidth,
+                sci_mode=original_print_options.sci_mode
+            )
+        
         return {
             'input_ids': encoding['input_ids'].flatten(),
             'attention_mask': encoding['attention_mask'].flatten(),
@@ -149,7 +201,8 @@ class HuanHuanTrainer:
     """
     
     def __init__(self, config_path: str = "./huanhuan_config_fast.yaml"):
-        self.config_path = config_path
+        # 解析配置文件路径
+        self.config_path = str(resolve_path(config_path))
         self.config = None
         self.device = None
         self.model = None
@@ -178,13 +231,9 @@ class HuanHuanTrainer:
             
             # 处理输出目录路径
             output_dir = self.config['training']['output_dir']
-            if output_dir.startswith("..") or not os.path.isabs(output_dir):
-                # 获取项目根目录（training目录的上级目录）
-                script_dir = Path(__file__).parent
-                project_root = script_dir.parent
-                # 构建相对于项目根目录的路径
-                output_dir_path = project_root / "training" / "models" / Path(output_dir).name
-                self.config['training']['output_dir'] = str(output_dir_path)
+            # 输出目录基于 script_dir 解析
+            output_dir_path = resolve_path(output_dir)
+            self.config['training']['output_dir'] = str(output_dir_path)
             
             # 创建输出目录
             os.makedirs(self.config['training']['output_dir'], exist_ok=True)
@@ -201,14 +250,9 @@ class HuanHuanTrainer:
             # 从配置中获取日志文件路径
             log_file = self.config.get('logging', {}).get('log_file', None)
             if log_file:
-                # 如果是相对路径，则基于项目根目录进行解析
-                if log_file.startswith("..") or not os.path.isabs(log_file):
-                    # 获取项目根目录（training目录的上级目录）
-                    script_dir = Path(__file__).parent
-                    project_root = script_dir.parent
-                    # 构建相对于项目根目录的路径
-                    log_file_path = project_root / "training" / "logs" / Path(log_file).name
-                    log_file = str(log_file_path)
+                # 日志文件基于 script_dir 解析
+                log_file_path = resolve_path(log_file)
+                log_file = str(log_file_path)
                 
                 # 添加文件日志处理器
                 log_dir = Path(log_file).parent
@@ -304,14 +348,9 @@ class HuanHuanTrainer:
         # 获取配置中的数据文件路径
         data_file = self.config['data']['train_file']
         
-        # 如果是相对路径，则基于项目根目录进行解析
-        if data_file.startswith("..") or not os.path.isabs(data_file):
-            # 获取项目根目录（training目录的上级目录）
-            script_dir = Path(__file__).parent
-            project_root = script_dir.parent
-            # 构建相对于项目根目录的路径
-            data_file_path = project_root / "data" / "processed" / "train.jsonl"
-            data_file = str(data_file_path)
+        # 数据文件基于 script_dir 解析
+        data_file_path = resolve_path(data_file)
+        data_file = str(data_file_path)
         
         if not os.path.exists(data_file):
             logger.error(f"训练数据文件不存在: {data_file}")

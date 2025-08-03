@@ -8,7 +8,7 @@ data_download:
 
 # 数据处理配置
 data_process:
-  max_samples: null  # null表示处理全部数据，也可以设置为具体数字如1000
+  max_samples: 50  # null表示处理全部数据，也可以设置为具体数字如1000
   train_ratio: 0.8
   val_ratio: 0.1
   test_ratio: 0.1

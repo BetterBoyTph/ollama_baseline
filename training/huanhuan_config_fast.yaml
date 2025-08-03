@@ -42,9 +42,9 @@ lora:
 
 # 数据配置
 data:
-  train_file: "../../data/processed/train.jsonl"
-  validation_file: "../../data/processed/validation.jsonl"
-  test_file: "../../data/processed/test.jsonl"
+  train_file: "../data/processed/train.jsonl"  # 训练数据
+  validation_file: "../data/processed/train.jsonl"  # 验证数据
+  test_file: "../data/processed/train.jsonl"  # 测试数据
   max_seq_length: 128                         # 极小序列长度以节省内存
   preprocessing_num_workers: 0                # 禁用多线程预处理
 
@@ -150,6 +150,7 @@ model:
   torch_dtype: "auto"                         # 自动选择数据类型
   low_cpu_mem_usage: true                     # 低CPU内存使用
   device_map: "auto"                          # 自动设备映射
+  max_length: 64
 
 # 分词器配置
 tokenizer:

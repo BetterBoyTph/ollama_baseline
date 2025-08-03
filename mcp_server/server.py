@@ -5,23 +5,35 @@ import requests
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 from mcp.server.fastmcp import FastMCP
+import asyncio
+import aiohttp
+from concurrent.futures import ThreadPoolExecutor
+import psutil
 
-def get_ollama_host() -> str:
-    """Get the Ollama host from environment variables"""
-    return os.getenv("OLLAMA_HOST", "http://localhost:11434")
+def get_vllm_host() -> str:
+    """Get the vLLM host from environment variables"""
+    return os.getenv("VLLM_HOST", "http://localhost:8000")
 
 def get_model_name() -> str:
     """Get the model name from environment variables"""
-    return os.getenv("HUANHUAN_MODEL", "huanhuan_fast")
+    return os.getenv("HUANHUAN_MODEL", "huanhuan-qwen")
 
-OLLAMA_HOST = get_ollama_host()
+VLLM_HOST = get_vllm_host()
 MODEL_NAME = get_model_name()
+
+# 根据系统配置设置并发参数 (根据CPU核心数动态设置)
+# CPU核心数的一半作为并发请求数，但不超过8且至少为1
+cpu_count = psutil.cpu_count(logical=False) or 4
+MAX_CONCURRENT_REQUESTS = min(8, max(1, cpu_count // 2))
+REQUEST_TIMEOUT = 30  # 请求超时时间
+
+# 创建线程池用于并发请求
+executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_REQUESTS)
 
 mcp = FastMCP("huanhuan-chat")
 
-@mcp.tool()
-def chat_with_huanhuan(message: str, temperature: Optional[float] = 0.7, top_p: Optional[float] = 0.9, top_k: Optional[int] = 40, max_tokens: Optional[int] = 256) -> Dict[str, Any]:
-    """与甄嬛进行对话交流
+def chat_with_vllm_sync(message: str, temperature: Optional[float] = 0.7, top_p: Optional[float] = 0.9, top_k: Optional[int] = 40, max_tokens: Optional[int] = 256) -> Dict[str, Any]:
+    """与甄嬛进行对话交流 - 同步版本
     
     Args:
         message (str): 用户发送给甄嬛的消息
@@ -38,27 +50,24 @@ def chat_with_huanhuan(message: str, temperature: Optional[float] = 0.7, top_p: 
         request_data = {
             "model": MODEL_NAME,
             "prompt": message,
-            "stream": False,
-            "options": {
-                "temperature": temperature,
-                "top_p": top_p,
-                "top_k": top_k,
-                "num_predict": max_tokens
-            }
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "top_p": top_p,
+            "top_k": top_k
         }
         
-        # 发送请求到Ollama
+        # 发送请求到vLLM
         response = requests.post(
-            f"{OLLAMA_HOST}/api/generate",
+            f"{VLLM_HOST}/v1/completions",
             json=request_data,
-            timeout=30
+            timeout=REQUEST_TIMEOUT
         )
         response.raise_for_status()
         
         result = response.json()
         
         return {
-            "response": result.get('response', '抱歉，臣妾暂时无法回应。'),
+            "response": result['choices'][0]['text'] if result.get('choices') else '抱歉，臣妾暂时无法回应。',
             "model": MODEL_NAME,
             "timestamp": datetime.now().isoformat(),
             "params": {
@@ -67,16 +76,33 @@ def chat_with_huanhuan(message: str, temperature: Optional[float] = 0.7, top_p: 
                 "top_k": top_k,
                 "max_tokens": max_tokens
             },
-            "total_duration": result.get('total_duration'),
-            "load_duration": result.get('load_duration'),
-            "prompt_eval_count": result.get('prompt_eval_count'),
-            "eval_count": result.get('eval_count')
+            "total_duration": result.get('usage', {}).get('total_tokens'),
+            "prompt_eval_count": result.get('usage', {}).get('prompt_tokens'),
+            "eval_count": result.get('usage', {}).get('completion_tokens')
         }
         
     except requests.exceptions.RequestException as e:
-        return {"error": f"Ollama请求失败: {str(e)}"}
+        return {"error": f"vLLM请求失败: {str(e)}"}
     except Exception as e:
         return {"error": f"对话处理失败: {str(e)}"}
+
+@mcp.tool()
+def chat_with_huanhuan(message: str, temperature: Optional[float] = 0.7, top_p: Optional[float] = 0.9, top_k: Optional[int] = 40, max_tokens: Optional[int] = 256) -> Dict[str, Any]:
+    """与甄嬛进行对话交流
+    
+    Args:
+        message (str): 用户发送给甄嬛的消息
+        temperature (Optional[float]): 控制回复的随机性，范围0.1-2.0，默认0.7
+        top_p (Optional[float]): 核采样参数，范围0.1-1.0，默认0.9
+        top_k (Optional[int]): Top-k采样参数，范围1-100，默认40
+        max_tokens (Optional[int]): 最大生成token数，范围50-500，默认256
+        
+    Returns:
+        Dict[str, Any]: 包含甄嬛回复和相关信息的字典
+    """
+    # 使用线程池执行同步请求以支持并发
+    loop = asyncio.get_event_loop()
+    return loop.run_in_executor(executor, chat_with_vllm_sync, message, temperature, top_p, top_k, max_tokens)
 
 @mcp.tool()
 def get_model_info() -> Dict[str, Any]:
@@ -86,25 +112,24 @@ def get_model_info() -> Dict[str, Any]:
         Dict[str, Any]: 模型信息，包括名称、大小、修改时间等
     """
     try:
-        response = requests.get(f"{OLLAMA_HOST}/api/tags", timeout=5)
+        response = requests.get(f"{VLLM_HOST}/v1/models", timeout=5)
         response.raise_for_status()
         
         data = response.json()
-        models = data.get('models', [])
+        models = data.get('data', [])
         
         # 查找嬛嬛模型
         huanhuan_model = None
         for model in models:
-            if MODEL_NAME in model.get('name', ''):
+            if MODEL_NAME in model.get('id', ''):
                 huanhuan_model = model
                 break
         
         if huanhuan_model:
             return {
-                "name": huanhuan_model.get('name'),
-                "size": huanhuan_model.get('size'),
-                "digest": huanhuan_model.get('digest'),
-                "modified_at": huanhuan_model.get('modified_at'),
+                "name": huanhuan_model.get('id'),
+                "owned_by": huanhuan_model.get('owned_by'),
+                "created": huanhuan_model.get('created'),
                 "details": huanhuan_model.get('details', {})
             }
         else:
@@ -117,24 +142,24 @@ def get_model_info() -> Dict[str, Any]:
 
 @mcp.tool()
 def list_available_models() -> Dict[str, Any]:
-    """列出Ollama中所有可用的模型
+    """列出vLLM中所有可用的模型
     
     Returns:
         Dict[str, Any]: 包含所有可用模型列表的字典
     """
     try:
-        response = requests.get(f"{OLLAMA_HOST}/api/tags", timeout=5)
+        response = requests.get(f"{VLLM_HOST}/v1/models", timeout=5)
         response.raise_for_status()
         
         data = response.json()
-        models = data.get('models', [])
+        models = data.get('data', [])
         
         model_list = []
         for model in models:
             model_list.append({
-                "name": model.get('name'),
-                "size": model.get('size'),
-                "modified_at": model.get('modified_at')
+                "name": model.get('id'),
+                "owned_by": model.get('owned_by'),
+                "created": model.get('created')
             })
         
         return {
@@ -149,26 +174,26 @@ def list_available_models() -> Dict[str, Any]:
         return {"error": f"处理失败: {str(e)}"}
 
 @mcp.tool()
-def check_ollama_status() -> Dict[str, Any]:
-    """检查Ollama服务的运行状态
+def check_vllm_status() -> Dict[str, Any]:
+    """检查vLLM服务的运行状态
     
     Returns:
-        Dict[str, Any]: Ollama服务状态信息
+        Dict[str, Any]: vLLM服务状态信息
     """
     try:
-        # 检查Ollama是否运行
-        response = requests.get(f"{OLLAMA_HOST}/api/tags", timeout=5)
+        # 检查vLLM是否运行
+        response = requests.get(f"{VLLM_HOST}/v1/models", timeout=5)
         
         if response.status_code == 200:
             data = response.json()
-            models = data.get('models', [])
+            models = data.get('data', [])
             
             # 检查嬛嬛模型是否存在
-            huanhuan_available = any(MODEL_NAME in model.get('name', '') for model in models)
+            huanhuan_available = any(MODEL_NAME in model.get('id', '') for model in models)
             
             return {
                 "status": "running",
-                "host": OLLAMA_HOST,
+                "host": VLLM_HOST,
                 "model_name": MODEL_NAME,
                 "model_available": huanhuan_available,
                 "total_models": len(models),
@@ -177,28 +202,28 @@ def check_ollama_status() -> Dict[str, Any]:
         else:
             return {
                 "status": "error",
-                "error": f"Ollama响应状态码: {response.status_code}",
-                "host": OLLAMA_HOST
+                "error": f"vLLM响应状态码: {response.status_code}",
+                "host": VLLM_HOST
             }
             
     except requests.exceptions.ConnectionError:
         return {
             "status": "disconnected",
-            "error": "无法连接到Ollama服务",
-            "host": OLLAMA_HOST,
-            "suggestion": "请确保Ollama服务正在运行"
+            "error": "无法连接到vLLM服务",
+            "host": VLLM_HOST,
+            "suggestion": "请确保vLLM服务正在运行"
         }
     except requests.exceptions.Timeout:
         return {
             "status": "timeout",
-            "error": "连接Ollama服务超时",
-            "host": OLLAMA_HOST
+            "error": "连接vLLM服务超时",
+            "host": VLLM_HOST
         }
     except Exception as e:
         return {
             "status": "error",
             "error": f"检查状态失败: {str(e)}",
-            "host": OLLAMA_HOST
+            "host": VLLM_HOST
         }
 
 @mcp.tool()
@@ -227,26 +252,23 @@ def roleplay_conversation(scenario: str, user_message: str, character_mood: Opti
         request_data = {
             "model": MODEL_NAME,
             "prompt": roleplay_prompt,
-            "stream": False,
-            "options": {
-                "temperature": temperature,
-                "top_p": 0.9,
-                "top_k": 40,
-                "num_predict": 300
-            }
+            "max_tokens": 300,
+            "temperature": temperature,
+            "top_p": 0.9,
+            "top_k": 40
         }
         
         response = requests.post(
-            f"{OLLAMA_HOST}/api/generate",
+            f"{VLLM_HOST}/v1/completions",
             json=request_data,
-            timeout=30
+            timeout=REQUEST_TIMEOUT
         )
         response.raise_for_status()
         
         result = response.json()
         
         return {
-            "response": result.get('response', '臣妾一时语塞，不知如何回应。'),
+            "response": result['choices'][0]['text'] if result.get('choices') else '臣妾一时语塞，不知如何回应。',
             "scenario": scenario,
             "character_mood": character_mood,
             "user_message": user_message,
@@ -290,26 +312,23 @@ def poetry_interaction(poetry_type: str, user_input: str, temperature: Optional[
         request_data = {
             "model": MODEL_NAME,
             "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": temperature,
-                "top_p": 0.95,
-                "top_k": 50,
-                "num_predict": 400
-            }
+            "max_tokens": 400,
+            "temperature": temperature,
+            "top_p": 0.95,
+            "top_k": 50
         }
         
         response = requests.post(
-            f"{OLLAMA_HOST}/api/generate",
+            f"{VLLM_HOST}/v1/completions",
             json=request_data,
-            timeout=30
+            timeout=REQUEST_TIMEOUT
         )
         response.raise_for_status()
         
         result = response.json()
         
         return {
-            "response": result.get('response', '臣妾才疏学浅，一时难以应对。'),
+            "response": result['choices'][0]['text'] if result.get('choices') else '臣妾才疏学浅，一时难以应对。',
             "poetry_type": poetry_type,
             "user_input": user_input,
             "model": MODEL_NAME,

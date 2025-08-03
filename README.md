@@ -1,6 +1,15 @@
 # 甄嬛传角色对话系统 (Ollama Baseline)
 
-基于《甄嬛传》角色数据的智能对话系统，使用 LoRA 微调技术训练甄嬛角色模型，支持多种交互方式。
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.13-blue" alt="Python 3.13">
+  <img src="https://img.shields.io/badge/PyTorch-2.x-red" alt="PyTorch 2.x">
+  <img src="https://img.shields.io/badge/Transformers-4.30%2B-brightgreen" alt="Transformers 4.30+">
+  <img src="https://img.shields.io/badge/Streamlit-1.20%2B-orange" alt="Streamlit 1.20+">
+</p>
+
+## 🎭 项目简介
+
+这是一个基于《甄嬛传》角色数据的智能对话系统，使用 LoRA 微调技术训练甄嬛角色模型，支持多种交互方式。用户可以与甄嬛进行对话，体验宫廷生活、诗词歌赋等传统文化内容。
 
 ## 📁 项目结构
 
@@ -33,23 +42,25 @@ ollama_baseline/
 └── README.md          # 项目说明
 ```
 
-## 🚀 功能模块
+## 🌟 核心特性
 
-### 📱 Web应用 (application)
-- **huanhuan_web.py**: 基于 Streamlit 的甄嬛角色对话Web界面
-- 支持实时对话、参数调节、聊天历史管理
-- 提供直观的用户界面和流式对话体验
+- 📚 **专业知识**: 基于《甄嬛传》电视剧内容训练，具备丰富的宫廷文化知识
+- ⚡ **高效微调**: 采用 LoRA 高效微调技术，显著降低训练成本
+- 🖥️ **Web界面**: 基于 Streamlit 构建的友好交互界面
+- 🔄 **多模态交互**: 支持实时对话、参数调节、聊天历史管理等功能
+- 📊 **反馈机制**: 内置用户反馈收集系统，持续优化模型效果
+- 🚀 **灵活部署**: 支持 Ollama 和 vLLM 两种部署方式
 
-### 📊 数据处理 (dataScripts)
-- **huanhuan_data_prepare.py**: 甄嬛传训练数据预处理脚本
-- **download_data.py**: 从GitHub下载甄嬛传数据集
-- 支持数据清洗、格式转换、分割等功能
+## 🏗️ 系统架构
 
-### 🚀 模型部署 (deployment)
-- **FAST_DEPLOYMENT_GUIDE.md**: 详细的快速部署指南
-- **Modelfile.huanhuan**: Ollama模型配置文件
-- **huanhuan_fast_lora.gguf**: 训练好的LoRA权重文件
-- 支持一键部署到Ollama服务
+```
+甄嬛传角色对话系统
+├── Web应用层 (Streamlit)
+├── 服务层 (MCP Server)
+├── 模型层 (Qwen2.5-0.5B + LoRA)
+├── 数据层 (训练数据、用户反馈)
+└── 部署层 (Ollama/vLLM)
+```
 
 ### 🎯 模型评估 (evaluate)
 - **evaluator.py**: 大模型自动化评估模块

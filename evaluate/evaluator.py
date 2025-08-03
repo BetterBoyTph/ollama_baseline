@@ -17,6 +17,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import requests
 from rouge import Rouge
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import psutil
 
 
 class ModelEvaluator:
@@ -28,7 +30,11 @@ class ModelEvaluator:
         """
         初始化模型评估器
         """
-        self.ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        self.vllm_host = os.getenv("VLLM_HOST", "http://localhost:8000")
+        # 根据CPU核心数动态设置并发参数
+        cpu_count = psutil.cpu_count(logical=False) or 4
+        self.max_concurrent_requests = min(8, max(1, cpu_count // 2))
+        self.executor = ThreadPoolExecutor(max_workers=self.max_concurrent_requests)
 
     def load_test_data(self, data_path: str) -> List[Dict]:
         """
@@ -58,22 +64,28 @@ class ModelEvaluator:
         Returns:
             模型响应文本
         """
+        # 设置默认参数
+        max_tokens = kwargs.get('max_tokens', 150)
+        temperature = kwargs.get('temperature', 0.7)
+        top_p = kwargs.get('top_p', 0.9)
+        
         request_data = {
             "model": model_name,
             "prompt": prompt,
-            "stream": False,
-            "options": kwargs
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "top_p": top_p
         }
 
         try:
             response = requests.post(
-                f"{self.ollama_host}/api/generate",
+                f"{self.vllm_host}/v1/completions",
                 json=request_data,
                 timeout=30
             )
             response.raise_for_status()
             result = response.json()
-            return result.get('response', '')
+            return result['choices'][0]['text'] if result.get('choices') else ''
         except Exception as e:
             print(f"获取模型响应失败: {e}")
             return ""
@@ -494,6 +506,38 @@ class ModelEvaluator:
             },
             'individual_results': results
         }
+
+    def evaluate_batch(self, model_name: str, test_data: List[Dict], **kwargs) -> List[Dict[str, Any]]:
+        """
+        批量评估
+        
+        Args:
+            model_name: 模型名称
+            test_data: 测试数据列表
+            **kwargs: 其他参数
+            
+        Returns:
+            评估结果列表
+        """
+        results = []
+        
+        # 使用线程池并发处理多个请求
+        futures = []
+        for item in test_data:
+            prompt = item.get('prompt', '')
+            reference = item.get('reference', '')
+            future = self.executor.submit(self.evaluate_single, model_name, prompt, reference, **kwargs)
+            futures.append(future)
+        
+        # 收集结果
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                results.append(result)
+            except Exception as e:
+                print(f"评估过程中出现错误: {e}")
+        
+        return results
 
     def compare_models(self, model_names: List[str], test_data_path: str, 
                       sample_size: int = None) -> Dict[str, Any]:

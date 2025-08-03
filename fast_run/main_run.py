@@ -73,10 +73,12 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 # 添加项目根目录到Python路径
-# 获取当前脚本所在目录的父级目录作为项目根目录
 script_dir = Path(__file__).parent
 project_root = script_dir.parent
 sys.path.insert(0, str(project_root))
+    
+# 导入typing模块的List类型用于类型注解
+from typing import List
 
 # 默认配置
 DEFAULT_CONFIG = {
@@ -309,59 +311,80 @@ def step5_evaluate_model(config: Dict[str, Any]):
 
 def step6_deploy_model(config: Dict[str, Any]):
     """
-    步骤6: 部署模型
+    步骤6: 部署模型 (使用vLLM)
     
     Args:
         config (Dict[str, Any]): 配置字典
     """
-    print("\n🚀 步骤6: 部署模型")
+    print("\n🚀 步骤6: 部署模型 (使用vLLM)")
+    if not config["model_deployment"]["enabled"]:
+        print("⏭️  跳过模型部署步骤")
+        return True
     
-    # 检查转换后的模型文件
-    gguf_model = project_root / "deployment" / "huanhuan_fast_lora.gguf"
-    if not gguf_model.exists():
-        print("❌ 未找到GGUF格式的模型文件")
+    # 检查模型文件是否存在
+    model_path = Path(config["model_deployment"]["model_path"])
+    if not model_path.exists():
+        print("❌ 未找到训练好的模型文件")
         return False
     
-    # 1. 启动Ollama服务（如果尚未运行）
-    print("🔄 启动Ollama服务...")
+    # 1. 拉取vLLM Docker镜像
+    print("📥 拉取vLLM Docker镜像...")
+    pull_command = "docker pull vllm/vllm-openai:latest"
+    if not run_command(pull_command, "拉取vLLM Docker镜像"):
+        print("❌ 拉取vLLM Docker镜像失败")
+        return False
+    
+    # 2. 启动vLLM服务
+    print("🔄 启动vLLM服务...")
     try:
-        # 尝试检查Ollama服务是否已在运行
+        # 检查是否已有vLLM容器在运行
         result = subprocess.run(
-            "ollama list", 
+            "docker ps | grep huanhuan-vllm", 
             shell=True, 
             capture_output=True, 
-            text=True,
-            timeout=10
+            text=True
         )
         if result.returncode == 0:
-            print("✅ Ollama服务已在运行")
+            print("✅ vLLM服务已在运行")
         else:
-            # 启动Ollama服务
+            # 启动vLLM容器
+            start_command = f"""docker run --gpus all \\
+                --name huanhuan-vllm \\
+                -v {project_root}/training/training/models/huanhuan_fast:/models/huanhuan_fast \\
+                -p 8000:8000 \\
+                --env NCCL_IGNORE_DISABLED_P2P=1 \\
+                vllm/vllm-openai:latest \\
+                --model Qwen/Qwen2.5-0.5B-Instruct \\
+                --adapter /models/huanhuan_fast \\
+                --host 0.0.0.0 \\
+                --port 8000 \\
+                --enable-lora \\
+                --max-lora-rank 64 \\
+                --tensor-parallel-size 1 \\
+                --gpu-memory-utilization 0.8 \\
+                --max-model-len 4096 \\
+                --enforce-eager"""
+            
             subprocess.Popen(
-                "ollama serve",
+                start_command,
                 shell=True,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
-            print("⏳ 等待Ollama服务启动...")
-            time.sleep(10)  # 等待服务启动
+            print("⏳ 等待vLLM服务启动...")
+            time.sleep(15)  # 等待服务启动
+            
+            # 验证服务是否启动成功
+            verify_command = "curl -f http://localhost:8000/v1/models"
+            if run_command(verify_command, "验证vLLM服务"):
+                print("✅ vLLM服务启动成功")
+            else:
+                print("⚠️  vLLM服务启动可能失败，请手动检查")
     except Exception as e:
-        print(f"⚠️  启动Ollama服务时遇到问题: {e}")
+        print(f"⚠️  启动vLLM服务时遇到问题: {e}")
         print("   将尝试继续执行后续步骤...")
     
-    # 2. 拉取基础模型
-    print("📥 拉取基础模型...")
-    base_model = config["model_deployment"]["base_model"]
-    pull_base_model = f"ollama pull {base_model}"
-    if not run_command(pull_base_model, f"拉取基础模型 {base_model}"):
-        print("❌ 拉取基础模型失败")
-        return False
-    
-    # 3. 使用Ollama创建模型
-    modelfile = config["model_deployment"]["modelfile"]
-    model_name = config["model_deployment"]["model_name"]
-    command = f"ollama create {model_name} -f {modelfile}"
-    return run_command(command, "部署模型到Ollama", cwd=project_root)
+    return True
 
 def step7_start_web_interface(config: Dict[str, Any]):
     """
@@ -431,19 +454,19 @@ def main():
         epilog=__doc__
     )
     parser.add_argument(
+        "--config", 
+        default="fast_run/config.yaml",
+        help='配置文件路径 (默认: fast_run/config.yaml)'
+    )
+    parser.add_argument(
         "--skip-steps", 
         type=str, 
         help="跳过的步骤编号，用逗号分隔，例如: 1,2,3"
     )
     parser.add_argument(
-        "--only-step", 
+        "--only-steps", 
         type=str, 
-        help="只执行指定步骤，例如: 4"
-    )
-    parser.add_argument(
-        "--config",
-        type=str,
-        help="配置文件路径（YAML格式）"
+        help="只执行指定步骤，例如: 6,7"
     )
     
     args = parser.parse_args()
@@ -459,14 +482,22 @@ def main():
         except ValueError:
             print("❌ --skip-steps 参数格式错误，请使用数字并用逗号分隔")
             return False
+    # 解析只执行的步骤
+    only_steps = []
+    if args.only_steps:
+        try:
+            only_steps = [int(x.strip()) for x in args.only_steps.split(",")]
+        except ValueError:
+            print("❌ --only-steps 参数格式错误，请使用数字并用逗号分隔")
+            return False
     
     # 解析只执行的步骤
-    only_step = None
-    if args.only_step:
+    only_steps = []
+    if args.only_steps:
         try:
-            only_step = int(args.only_step)
+            only_steps = [int(x) for x in args.only_steps.split(",")]
         except ValueError:
-            print("❌ --only-step 参数格式错误，请使用数字")
+            print("❌ --only-steps 参数格式错误，请使用数字并用逗号分隔")
             return False
     
     # 检查前提条件
@@ -485,8 +516,7 @@ def main():
         (4, "转换模型格式", step4_convert_model),
         (5, "评估模型", step5_evaluate_model),
         (6, "部署模型", step6_deploy_model),
-        (7, "启动Web界面", step7_start_web_interface),
-        (8, "启动MCP服务器", step8_start_mcp_server)
+        (7, "启动Web界面", step7_start_web_interface)
     ]
     
     # 执行步骤
@@ -518,19 +548,18 @@ def main():
     
     print(f"\n{'='*60}")
     print("📋 执行总结:")
-    print(f"   成功步骤: {success_count}/{len(steps)}")
+    print(f"   成功步骤: {success_count}/{len(steps_to_run)}")
     print(f"   总耗时: {duration:.2f} 秒")
     
-    if success_count == len(steps):
+    if success_count == len(steps_to_run):
         web_port = config["web_interface"]["port"]
-        mcp_port = config["mcp_server"]["port"]
         model_name = config["model_deployment"]["model_name"]
         
         print("🎉 所有步骤执行完成！")
         print("\n💡 使用说明:")
         print(f"   - Web界面地址: http://localhost:{web_port}")
-        print(f"   - MCP服务器地址: http://localhost:{mcp_port}")
-        print(f"   - Ollama模型名称: {model_name}")
+        print(f"   - vLLM服务地址: http://localhost:8000")
+        print(f"   - 模型名称: {model_name}")
     else:
         print("⚠️  部分步骤执行失败，请检查日志")
     

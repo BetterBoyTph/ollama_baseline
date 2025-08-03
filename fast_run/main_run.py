@@ -201,23 +201,23 @@ def check_prerequisites():
         print("❌ 未安装PyTorch")
         return False
     
-    # 检查Ollama是否安装
+    # 检查Docker是否安装
     try:
         result = subprocess.run(
-            "ollama --version", 
+            "docker --version", 
             shell=True, 
             check=True, 
             capture_output=True, 
             text=True
         )
-        print(f"✅ Ollama已安装: {result.stdout.strip()}")
+        print(f"✅ Docker已安装: {result.stdout.strip()}")
     except subprocess.CalledProcessError:
-        print("❌ Ollama未安装，请先安装Ollama")
-        print("   安装命令: curl -fsSL https://ollama.ai/install.sh | sh")
+        print("❌ Docker未安装，请先安装Docker")
+        print("   Ubuntu安装命令: sudo apt install docker.io")
         return False
     except FileNotFoundError:
-        print("❌ Ollama未安装，请先安装Ollama")
-        print("   安装命令: curl -fsSL https://ollama.ai/install.sh | sh")
+        print("❌ Docker未安装，请先安装Docker")
+        print("   Ubuntu安装命令: sudo apt install docker.io")
         return False
     
     print("✅ 环境检查通过")
@@ -516,8 +516,16 @@ def main():
         (4, "转换模型格式", step4_convert_model),
         (5, "评估模型", step5_evaluate_model),
         (6, "部署模型", step6_deploy_model),
-        (7, "启动Web界面", step7_start_web_interface)
+        (7, "启动Web界面", step7_start_web_interface),
+        (8, "启动MCP服务器", step8_start_mcp_server)
     ]
+    
+    # 确定要执行的步骤
+    steps_to_run = []
+    if only_steps:
+        steps_to_run = [step for step in steps if step[0] in only_steps]
+    else:
+        steps_to_run = [step for step in steps if step[0] not in skip_steps]
     
     # 执行步骤
     start_time = time.time()
@@ -525,7 +533,7 @@ def main():
     
     for step_num, step_name, step_func in steps:
         # 判断是否应该执行此步骤
-        if only_step is not None and step_num != only_step:
+        if only_steps and step_num not in only_steps:
             print(f"\n⏭️  跳过步骤 {step_num}: {step_name}")
             success_count += 1
             continue
@@ -553,11 +561,13 @@ def main():
     
     if success_count == len(steps_to_run):
         web_port = config["web_interface"]["port"]
+        mcp_port = config["mcp_server"]["port"]
         model_name = config["model_deployment"]["model_name"]
         
         print("🎉 所有步骤执行完成！")
         print("\n💡 使用说明:")
         print(f"   - Web界面地址: http://localhost:{web_port}")
+        print(f"   - MCP服务器地址: http://localhost:{mcp_port}")
         print(f"   - vLLM服务地址: http://localhost:8000")
         print(f"   - 模型名称: {model_name}")
     else:

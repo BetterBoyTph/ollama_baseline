@@ -7,7 +7,7 @@
 ### 1. 确认训练完成
 确保以下文件存在：
 ```
-training/training/models/huanhuan_fast/
+training/models/huanhuan_fast/
 ├── adapter_config.json
 ├── adapter_model.safetensors
 └── train_results.json
@@ -46,7 +46,7 @@ docker run --rm --gpus all nvidia/cuda:11.0-base-ubuntu20.04 nvidia-smi
 将训练好的LoRA模型文件转换为vLLM兼容格式：
 ```bash
 # 确保模型文件在指定位置
-ls training/training/models/huanhuan_fast/
+ls training/models/huanhuan_fast/
 
 # 如果还没有转换模型，执行转换
 python convert_lora_to_gguf.py
@@ -63,7 +63,7 @@ docker pull vllm/vllm-openai:latest
 # 运行vLLM容器 (适用于RTX 3090 24G环境)
 docker run --gpus all \
     --name huanhuan-vllm \
-    -v $(pwd)/training/training/models/huanhuan_fast:/models/huanhuan_fast \
+    -v $(pwd)/training/models/huanhuan_fast:/models/huanhuan_fast \
     -v $(pwd)/deployment:/deployment \
     -p 8000:8000 \
     --env NCCL_IGNORE_DISABLED_P2P=1 \
@@ -73,11 +73,13 @@ docker run --gpus all \
     --host 0.0.0.0 \
     --port 8000 \
     --enable-lora \
-    --max-lora-rank 64 \
+    --max-lora-rank 16 \
     --tensor-parallel-size 1 \
     --gpu-memory-utilization 0.8 \
     --max-model-len 4096 \
-    --enforce-eager
+    --enforce-eager \
+    --max-num-seqs 256 \
+    --max-num-batched-tokens 4096
 ```
 
 ### 4. 验证部署
@@ -99,7 +101,7 @@ curl -X POST http://localhost:8000/v1/completions \
 # 激活虚拟环境
 source /root/autodl-tmp/huanhuan_env/bin/activate
 
-# 安装vLLM
+# 安装vLLm
 pip install vllm==0.5.4
 
 # 验证安装
@@ -114,46 +116,47 @@ cd /path/to/ollama_baseline
 # 启动vLLM服务 (针对RTX 3090 24G配置优化)
 python -m vllm.entrypoints.openai.api_server \
     --model Qwen/Qwen2.5-0.5B-Instruct \
-    --adapter ./training/training/models/huanhuan_fast \
+    --adapter ./training/models/huanhuan_fast \
     --host 0.0.0.0 \
     --port 8000 \
     --enable-lora \
-    --max-lora-rank 64 \
+    --max-lora-rank 16 \
     --tensor-parallel-size 1 \
     --gpu-memory-utilization 0.8 \
     --max-model-len 4096 \
-    --enforce-eager
+    --enforce-eager \
+    --max-num-seqs 256 \
+    --max-num-batched-tokens 4096
 ```
 
-## ⚙️ 系统配置和并发参数说明
+## ⚙️ 参数详细说明
 
-### 并发参数设置说明
+### 核心模型参数
+1. `--model Qwen/Qwen2.5-0.5B-Instruct`: 指定基础模型名称或路径
+2. `--adapter ./training/models/huanhuan_fast`: 指定LoRA适配器路径
+3. `--host 0.0.0.0`: 指定服务监听地址，0.0.0.0表示监听所有网络接口
+4. `--port 8000`: 指定服务监听端口
+5. `--enable-lora`: 启用LoRA适配器支持
+6. `--max-lora-rank 16`: 设置LoRA适配器的最大秩(rank)，应略大于实际使用的rank值
 
-根据系统配置 (RTX 3090 24G, 16核心CPU, 120G内存) 动态设置了以下参数：
+### 硬件资源配置参数
+1. `--tensor-parallel-size 1`: 设置张量并行大小，单GPU设置为1
+2. `--gpu-memory-utilization 0.8`: 设置GPU内存使用率上限，0.8表示使用80%的GPU内存
+3. `--max-model-len 4096`: 设置模型最大序列长度
+4. `--enforce-eager`: 强制使用eager模式执行，而非编译模式
 
-1. `MAX_CONCURRENT_REQUESTS` 动态计算:
-   - 根据CPU物理核心数的一半计算
-   - 最小值为1，最大值为8
-   - 对于16核心CPU，设置为8
+### 并发控制参数
+1. `--max-num-seqs 256`: 设置每个迭代中处理的最大序列数，控制并发请求数量
+2. `--max-num-batched-tokens 4096`: 设置每个迭代中处理的最大token数，控制批处理大小
 
-2. `--tensor-parallel-size 1`:
-   - 单GPU设置，无需张量并行
-
-3. `--gpu-memory-utilization 0.8`:
-   - 限制GPU内存使用率，保留空间给系统和其他进程
-
-4. `--max-model-len 4096`:
-   - 设置最大序列长度，平衡性能和内存使用
-
-5. `--enforce-eager`:
-   - 强制使用eager模式，避免CUDA图形编译开销
-
-这些参数确保了在RTX 3090 24G环境下能够稳定运行，并提供良好的并发处理能力。
+这些并发控制参数用于调节vLLM的批处理能力和并发性能：
+- `--max-num-seqs`: 控制同时处理的最大请求数，数值越大可以处理更多并发请求，但会增加内存消耗
+- `--max-num-batched-tokens`: 控制每个批次中处理的最大token数，数值越大批处理效率越高，但需要更多显存
 
 ## 🧪 模型推理示例
 
 ### Python API推理
-```python
+```
 import requests
 import json
 
@@ -191,7 +194,7 @@ if __name__ == "__main__":
 ```
 
 ### 批量推理
-```python
+```
 import requests
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -267,7 +270,7 @@ if __name__ == "__main__":
 ## 🛠️ 性能优化建议
 
 ### 1. GPU内存优化
-```bash
+```
 # 设置GPU内存使用比例
 --gpu-memory-utilization 0.8
 
@@ -279,7 +282,7 @@ if __name__ == "__main__":
 ```
 
 ### 2. 推理参数优化
-```python
+```
 request_data = {
     "temperature": 0.8,        # 控制输出随机性
     "top_p": 0.9,              # 核采样
@@ -289,7 +292,7 @@ request_data = {
 ```
 
 ### 3. LoRA配置优化
-```bash
+```
 # 设置最大LoRA rank
 --max-lora-rank 64
 
@@ -309,7 +312,7 @@ request_data = {
 ## 📞 API调用示例
 
 ### 单次对话
-```bash
+```
 curl -X POST http://localhost:8000/v1/completions \
   -H "Content-Type: application/json" \
   -d '{
@@ -321,7 +324,7 @@ curl -X POST http://localhost:8000/v1/completions \
 ```
 
 ### 聊天接口（如果使用OpenAI兼容API）
-```bash
+```
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
